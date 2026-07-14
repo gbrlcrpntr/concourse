@@ -15,9 +15,11 @@ import (
 )
 
 type TriggerJobCommand struct {
-	Job   flaghelpers.JobFlag  `short:"j" long:"job" required:"true" value-name:"PIPELINE/JOB" description:"Name of a job to trigger"`
-	Watch bool                 `short:"w" long:"watch" description:"Start watching the build output"`
-	Team  flaghelpers.TeamFlag `long:"team" description:"Name of the team to which the job belongs, if different from the target default"`
+	Job     flaghelpers.JobFlag                `short:"j" long:"job" required:"true" value-name:"PIPELINE/JOB" description:"Name of a job to trigger"`
+	Var     []flaghelpers.VariablePairFlag     `short:"v" long:"var" unquote:"false" value-name:"[NAME=STRING]" description:"Specify a string value for a var declared by the job"`
+	YAMLVar []flaghelpers.YAMLVariablePairFlag `short:"y" long:"yaml-var" unquote:"false" value-name:"[NAME=YAML]" description:"Specify a YAML value for a var declared by the job"`
+	Watch   bool                               `short:"w" long:"watch" description:"Start watching the build output"`
+	Team    flaghelpers.TeamFlag               `long:"team" description:"Name of the team to which the job belongs, if different from the target default"`
 }
 
 func (command *TriggerJobCommand) Execute(args []string) error {
@@ -43,11 +45,23 @@ func (command *TriggerJobCommand) Execute(args []string) error {
 		return err
 	}
 
-	build, err = team.CreateJobBuild(pipelineRef, jobName)
+	buildVars := map[string]any{}
+	for _, pair := range command.Var {
+		buildVars[pair.Ref.String()] = pair.Value
+	}
+	for _, pair := range command.YAMLVar {
+		buildVars[pair.Ref.String()] = pair.Value
+	}
+
+	build, err = team.CreateJobBuildWithVars(pipelineRef, jobName, buildVars)
 	if err != nil {
 		return err
 	} else {
 		fmt.Printf("started %s/%s #%s\n", pipelineRef.String(), jobName, build.Name)
+	}
+
+	if len(buildVars) > 0 && len(build.TriggerVars) == 0 {
+		fmt.Fprintf(ui.Stderr, "warning: the server did not record any trigger vars; it may predate job vars support\n")
 	}
 
 	if command.Watch {

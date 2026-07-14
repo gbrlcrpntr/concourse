@@ -64,6 +64,67 @@ var _ = Describe("trigger-job", func() {
 					})
 				})
 
+				Context("when vars are specified", func() {
+					BeforeEach(func() {
+						atcServer.AppendHandlers(
+							ghttp.CombineHandlers(
+								ghttp.VerifyRequest("POST", mainPath),
+								ghttp.VerifyHeaderKV("Content-Type", "application/json"),
+								ghttp.VerifyJSON(`{"vars":{"branch":"feature-x","replicas":3}}`),
+								ghttp.RespondWithJSONEncoded(http.StatusOK, atc.Build{
+									ID:          57,
+									Name:        "42",
+									TriggerVars: map[string]any{"branch": "feature-x", "replicas": 3},
+								}),
+							),
+						)
+					})
+
+					It("sends them in the request body", func() {
+						flyCmd := exec.Command(flyPath, "-t", targetName, "trigger-job",
+							"-j", "awesome-pipeline/awesome-job",
+							"-v", "branch=feature-x",
+							"-y", "replicas=3",
+						)
+
+						sess, err := gexec.Start(flyCmd, GinkgoWriter, GinkgoWriter)
+						Expect(err).NotTo(HaveOccurred())
+
+						Eventually(sess).Should(gbytes.Say(`started awesome-pipeline/awesome-job #42`))
+
+						<-sess.Exited
+						Expect(sess.ExitCode()).To(Equal(0))
+						Expect(sess.Err).ToNot(gbytes.Say("warning"))
+					})
+				})
+
+				Context("when vars are specified but the server ignores them", func() {
+					BeforeEach(func() {
+						atcServer.AppendHandlers(
+							ghttp.CombineHandlers(
+								ghttp.VerifyRequest("POST", mainPath),
+								ghttp.RespondWithJSONEncoded(http.StatusOK, atc.Build{ID: 57, Name: "42"}),
+							),
+						)
+					})
+
+					It("warns that the server may predate job vars support", func() {
+						flyCmd := exec.Command(flyPath, "-t", targetName, "trigger-job",
+							"-j", "awesome-pipeline/awesome-job",
+							"-v", "branch=feature-x",
+						)
+
+						sess, err := gexec.Start(flyCmd, GinkgoWriter, GinkgoWriter)
+						Expect(err).NotTo(HaveOccurred())
+
+						Eventually(sess).Should(gbytes.Say(`started awesome-pipeline/awesome-job #42`))
+
+						<-sess.Exited
+						Expect(sess.ExitCode()).To(Equal(0))
+						Expect(sess.Err).To(gbytes.Say("warning: the server did not record any trigger vars"))
+					})
+				})
+
 				Context("user is NOT targeting the same team that the pipeline belongs to", func() {
 
 					BeforeEach(func() {
