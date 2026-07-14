@@ -70,6 +70,7 @@ func (b *inMemoryCheckBuildForApi) StartTime() time.Time              { return b
 func (b *inMemoryCheckBuildForApi) EndTime() time.Time                { return b.endTime }
 func (b *inMemoryCheckBuildForApi) Status() BuildStatus               { return b.status }
 func (b *inMemoryCheckBuildForApi) CreatedBy() *string                { return nil }
+func (b *inMemoryCheckBuildForApi) TriggerVars() map[string]any       { return nil }
 func (b *inMemoryCheckBuildForApi) Schema() string                    { return schema }
 func (b *inMemoryCheckBuildForApi) IsRunning() bool                   { return b.status == BuildStatusStarted }
 func (b *inMemoryCheckBuildForApi) IsDrained() bool                   { return false }

@@ -13,6 +13,7 @@ type Server struct {
 	externalURL   string
 	rejector      auth.Rejector
 	secretManager creds.Secrets
+	varSourcePool creds.VarSourcePool
 	jobFactory    db.JobFactory
 }
 
@@ -20,6 +21,7 @@ func NewServer(
 	logger lager.Logger,
 	externalURL string,
 	secretManager creds.Secrets,
+	varSourcePool creds.VarSourcePool,
 	jobFactory db.JobFactory,
 ) *Server {
 	return &Server{
@@ -27,6 +29,7 @@ func NewServer(
 		externalURL:   externalURL,
 		rejector:      auth.UnauthorizedRejector{},
 		secretManager: secretManager,
+		varSourcePool: varSourcePool,
 		jobFactory:    jobFactory,
 	}
 }

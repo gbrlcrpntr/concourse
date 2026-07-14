@@ -18,13 +18,21 @@ type buildVariables struct {
 	lock sync.RWMutex
 }
 
-func newBuildVariables(credVars vars.Variables) *buildVariables {
+// newBuildVariables constructs the build's var scope. seededLocalVars are
+// pre-populated ((.:var)) values - job var defaults overlaid with the build's
+// trigger-time overrides. They are not tracked for redaction, matching the
+// across step's treatment of user-declared, intentionally-public values.
+func newBuildVariables(credVars vars.Variables, seededLocalVars vars.StaticVariables) *buildVariables {
+	localVars := vars.StaticVariables{}
+	for k, v := range seededLocalVars {
+		localVars[k] = v
+	}
 	return &buildVariables{
 		parentScope: &vars.CredVarsTracker{
 			CredVars: credVars,
 			Tracker:  vars.NewTracker(),
 		},
-		localVars: vars.StaticVariables{},
+		localVars: localVars,
 		tracker:   vars.NewTracker(),
 	}
 }

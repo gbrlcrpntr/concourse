@@ -34,6 +34,7 @@ var _ = Describe("RejectArchivedWrappa", func() {
 			atc.PausePipeline,
 			atc.UnpausePipeline,
 			atc.CreateJobBuild,
+			atc.CreateJobBuildWebhook,
 			atc.ScheduleJob,
 			atc.CheckResource,
 			atc.CheckResourceType,

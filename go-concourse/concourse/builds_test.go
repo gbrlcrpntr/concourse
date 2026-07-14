@@ -97,6 +97,38 @@ var _ = Describe("ATC Handler Builds", func() {
 		})
 	})
 
+	Describe("CreateJobBuildWithVars", func() {
+		var expectedBuild atc.Build
+
+		BeforeEach(func() {
+			expectedBuild = atc.Build{
+				ID:      123,
+				Name:    "mybuild",
+				Status:  "pending",
+				JobName: "myjob",
+				APIURL:  "api/v1/builds/123",
+			}
+			expectedURL := "/api/v1/teams/some-team/pipelines/mypipeline/jobs/myjob/builds"
+
+			atcServer.AppendHandlers(
+				ghttp.CombineHandlers(
+					ghttp.VerifyRequest("POST", expectedURL),
+					ghttp.VerifyHeaderKV("Content-Type", "application/json"),
+					ghttp.VerifyJSON(`{"vars":{"branch":"feature-x"}}`),
+					ghttp.RespondWithJSONEncoded(http.StatusOK, expectedBuild),
+				),
+			)
+		})
+
+		It("sends the vars as the request body", func() {
+			build, err := team.CreateJobBuildWithVars(atc.PipelineRef{Name: "mypipeline"}, "myjob", map[string]any{
+				"branch": "feature-x",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(build).To(Equal(expectedBuild))
+		})
+	})
+
 	Describe("RerunJobBuild", func() {
 		var (
 			pipelineRef   atc.PipelineRef

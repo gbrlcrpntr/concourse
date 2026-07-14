@@ -403,6 +403,56 @@ func validateJobs(c atc.Config) ([]atc.ConfigWarning, error) {
 			}
 		}
 
+		for varName, varConfig := range job.Vars {
+			varIdentifier := fmt.Sprintf("%s.vars.%s", identifier, varName)
+
+			warning, err := atc.ValidateIdentifier(varName, varIdentifier)
+			if err != nil {
+				errorMessages = append(errorMessages, err.Error())
+			}
+			if warning != nil {
+				warnings = append(warnings, *warning)
+			}
+
+			if varConfig.Required && varConfig.Default != nil {
+				errorMessages = append(
+					errorMessages,
+					varIdentifier+" is required and so must not declare a default",
+				)
+			}
+
+			errorMessages = append(errorMessages, varConfig.ValidateDefinition(varIdentifier)...)
+		}
+
+		webhookNames := map[string]bool{}
+		for wi, webhook := range job.TriggerWebhooks {
+			webhookIdentifier := fmt.Sprintf("%s.trigger_webhooks[%d]", identifier, wi)
+
+			if webhook.Name == "" {
+				errorMessages = append(errorMessages, webhookIdentifier+" has no name")
+			} else if webhookNames[webhook.Name] {
+				errorMessages = append(
+					errorMessages,
+					fmt.Sprintf("%s has a duplicate name ('%s')", webhookIdentifier, webhook.Name),
+				)
+			} else {
+				webhookNames[webhook.Name] = true
+			}
+
+			if webhook.Token == "" {
+				errorMessages = append(errorMessages, webhookIdentifier+" has no token")
+			}
+
+			for varName := range webhook.VarMapping {
+				if _, declared := job.Vars[varName]; !declared {
+					errorMessages = append(
+						errorMessages,
+						fmt.Sprintf("%s.var_mapping refers to undeclared var '%s'", webhookIdentifier, varName),
+					)
+				}
+			}
+		}
+
 		step := job.Step()
 
 		validator := atc.NewStepValidator(c, []string{identifier, ".plan"})

@@ -263,6 +263,21 @@ type FakeTeam struct {
 		result1 atc.Build
 		result2 error
 	}
+	CreateJobBuildWithVarsStub        func(atc.PipelineRef, string, map[string]any) (atc.Build, error)
+	createJobBuildWithVarsMutex       sync.RWMutex
+	createJobBuildWithVarsArgsForCall []struct {
+		arg1 atc.PipelineRef
+		arg2 string
+		arg3 map[string]any
+	}
+	createJobBuildWithVarsReturns struct {
+		result1 atc.Build
+		result2 error
+	}
+	createJobBuildWithVarsReturnsOnCall map[int]struct {
+		result1 atc.Build
+		result2 error
+	}
 	CreateOrUpdateStub        func(atc.Team) (atc.Team, bool, bool, []concourse.ConfigWarning, error)
 	createOrUpdateMutex       sync.RWMutex
 	createOrUpdateArgsForCall []struct {
@@ -2003,6 +2018,72 @@ func (fake *FakeTeam) CreateJobBuildReturnsOnCall(i int, result1 atc.Build, resu
 		})
 	}
 	fake.createJobBuildReturnsOnCall[i] = struct {
+		result1 atc.Build
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeTeam) CreateJobBuildWithVars(arg1 atc.PipelineRef, arg2 string, arg3 map[string]any) (atc.Build, error) {
+	fake.createJobBuildWithVarsMutex.Lock()
+	ret, specificReturn := fake.createJobBuildWithVarsReturnsOnCall[len(fake.createJobBuildWithVarsArgsForCall)]
+	fake.createJobBuildWithVarsArgsForCall = append(fake.createJobBuildWithVarsArgsForCall, struct {
+		arg1 atc.PipelineRef
+		arg2 string
+		arg3 map[string]any
+	}{arg1, arg2, arg3})
+	stub := fake.CreateJobBuildWithVarsStub
+	fakeReturns := fake.createJobBuildWithVarsReturns
+	fake.recordInvocation("CreateJobBuildWithVars", []interface{}{arg1, arg2, arg3})
+	fake.createJobBuildWithVarsMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *FakeTeam) CreateJobBuildWithVarsCallCount() int {
+	fake.createJobBuildWithVarsMutex.RLock()
+	defer fake.createJobBuildWithVarsMutex.RUnlock()
+	return len(fake.createJobBuildWithVarsArgsForCall)
+}
+
+func (fake *FakeTeam) CreateJobBuildWithVarsCalls(stub func(atc.PipelineRef, string, map[string]any) (atc.Build, error)) {
+	fake.createJobBuildWithVarsMutex.Lock()
+	defer fake.createJobBuildWithVarsMutex.Unlock()
+	fake.CreateJobBuildWithVarsStub = stub
+}
+
+func (fake *FakeTeam) CreateJobBuildWithVarsArgsForCall(i int) (atc.PipelineRef, string, map[string]any) {
+	fake.createJobBuildWithVarsMutex.RLock()
+	defer fake.createJobBuildWithVarsMutex.RUnlock()
+	argsForCall := fake.createJobBuildWithVarsArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *FakeTeam) CreateJobBuildWithVarsReturns(result1 atc.Build, result2 error) {
+	fake.createJobBuildWithVarsMutex.Lock()
+	defer fake.createJobBuildWithVarsMutex.Unlock()
+	fake.CreateJobBuildWithVarsStub = nil
+	fake.createJobBuildWithVarsReturns = struct {
+		result1 atc.Build
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeTeam) CreateJobBuildWithVarsReturnsOnCall(i int, result1 atc.Build, result2 error) {
+	fake.createJobBuildWithVarsMutex.Lock()
+	defer fake.createJobBuildWithVarsMutex.Unlock()
+	fake.CreateJobBuildWithVarsStub = nil
+	if fake.createJobBuildWithVarsReturnsOnCall == nil {
+		fake.createJobBuildWithVarsReturnsOnCall = make(map[int]struct {
+			result1 atc.Build
+			result2 error
+		})
+	}
+	fake.createJobBuildWithVarsReturnsOnCall[i] = struct {
 		result1 atc.Build
 		result2 error
 	}{result1, result2}

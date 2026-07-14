@@ -16,20 +16,21 @@ const (
 	GetBuildPreparation = "GetBuildPreparation"
 	SetBuildComment     = "SetBuildComment"
 
-	GetJob         = "GetJob"
-	CreateJobBuild = "CreateJobBuild"
-	RerunJobBuild  = "RerunJobBuild"
-	ListAllJobs    = "ListAllJobs"
-	ListJobs       = "ListJobs"
-	ListJobBuilds  = "ListJobBuilds"
-	ListJobInputs  = "ListJobInputs"
-	GetJobBuild    = "GetJobBuild"
-	PauseJob       = "PauseJob"
-	UnpauseJob     = "UnpauseJob"
-	ScheduleJob    = "ScheduleJob"
-	GetVersionsDB  = "GetVersionsDB"
-	JobBadge       = "JobBadge"
-	MainJobBadge   = "MainJobBadge"
+	GetJob                = "GetJob"
+	CreateJobBuild        = "CreateJobBuild"
+	CreateJobBuildWebhook = "CreateJobBuildWebhook"
+	RerunJobBuild         = "RerunJobBuild"
+	ListAllJobs           = "ListAllJobs"
+	ListJobs              = "ListJobs"
+	ListJobBuilds         = "ListJobBuilds"
+	ListJobInputs         = "ListJobInputs"
+	GetJobBuild           = "GetJobBuild"
+	PauseJob              = "PauseJob"
+	UnpauseJob            = "UnpauseJob"
+	ScheduleJob           = "ScheduleJob"
+	GetVersionsDB         = "GetVersionsDB"
+	JobBadge              = "JobBadge"
+	MainJobBadge          = "MainJobBadge"
 
 	ClearTaskCache = "ClearTaskCache"
 
@@ -158,6 +159,9 @@ var Routes = rata.Routes([]rata.Route{
 	{Path: "/api/v1/teams/:team_name/pipelines/:pipeline_name/jobs/:job_name", Method: "GET", Name: GetJob},
 	{Path: "/api/v1/teams/:team_name/pipelines/:pipeline_name/jobs/:job_name/builds", Method: "GET", Name: ListJobBuilds},
 	{Path: "/api/v1/teams/:team_name/pipelines/:pipeline_name/jobs/:job_name/builds", Method: "POST", Name: CreateJobBuild},
+	// must precede RerunJobBuild: routes match in registration order, so the
+	// static "webhook" segment has to win over :build_name
+	{Path: "/api/v1/teams/:team_name/pipelines/:pipeline_name/jobs/:job_name/builds/webhook", Method: "POST", Name: CreateJobBuildWebhook},
 	{Path: "/api/v1/teams/:team_name/pipelines/:pipeline_name/jobs/:job_name/builds/:build_name", Method: "POST", Name: RerunJobBuild},
 	{Path: "/api/v1/teams/:team_name/pipelines/:pipeline_name/jobs/:job_name/inputs", Method: "GET", Name: ListJobInputs},
 	{Path: "/api/v1/teams/:team_name/pipelines/:pipeline_name/jobs/:job_name/builds/:build_name", Method: "GET", Name: GetJobBuild},

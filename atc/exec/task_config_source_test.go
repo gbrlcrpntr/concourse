@@ -556,6 +556,30 @@ run: {path: a/file}
 				}))
 			})
 		})
+
+		Context("when task vars include booleans and numbers", func() {
+			BeforeEach(func() {
+				taskConfig.Run.Args = []string{
+					"-al",
+					"dry-run=((task-dry-run))",
+					"clone-depth=((task-clone-depth))",
+				}
+				taskVars = atc.Params{
+					"task-variable-name": "task-variable-value",
+					"task-dry-run":       true,
+					"task-clone-depth":   2.0,
+				}
+			})
+
+			It("interpolates them into string fields", func() {
+				Expect(fetchErr).ToNot(HaveOccurred())
+				Expect(fetchedConfig.Run.Args).To(Equal([]string{
+					"-al",
+					"dry-run=true",
+					"clone-depth=2",
+				}))
+			})
+		})
 	})
 
 	Context("BaseResourceTypeDefaultsApplySource", func() {

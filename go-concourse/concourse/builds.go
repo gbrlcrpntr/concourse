@@ -37,18 +37,38 @@ func (team *team) CreateBuild(plan atc.Plan) (atc.Build, error) {
 }
 
 func (team *team) CreateJobBuild(pipelineRef atc.PipelineRef, jobName string) (atc.Build, error) {
+	return team.CreateJobBuildWithVars(pipelineRef, jobName, nil)
+}
+
+// CreateJobBuildWithVars creates a job build with explicit trigger-time var
+// overrides. The existing CreateJobBuild method remains the no-override API.
+func (team *team) CreateJobBuildWithVars(pipelineRef atc.PipelineRef, jobName string, buildVars map[string]any) (atc.Build, error) {
 	params := rata.Params{
 		"job_name":      jobName,
 		"pipeline_name": pipelineRef.Name,
 		"team_name":     team.Name(),
 	}
 
-	var build atc.Build
-	err := team.connection.Send(internal.Request{
+	request := internal.Request{
 		RequestName: atc.CreateJobBuild,
 		Params:      params,
 		Query:       pipelineRef.QueryParams(),
-	}, &internal.Response{
+	}
+
+	if len(buildVars) > 0 {
+		buffer := &bytes.Buffer{}
+		err := json.NewEncoder(buffer).Encode(atc.CreateJobBuildRequestBody{Vars: buildVars})
+		if err != nil {
+			return atc.Build{}, fmt.Errorf("unable to marshal vars: %w", err)
+		}
+		request.Body = buffer
+		request.Header = http.Header{
+			"Content-Type": {"application/json"},
+		}
+	}
+
+	var build atc.Build
+	err := team.connection.Send(request, &internal.Response{
 		Result: &build,
 	})
 

@@ -191,6 +191,38 @@ var _ = Describe("Engine", func() {
 									Expect(val).To(Equal("bar"))
 								})
 
+								Context("when the build's job declares vars", func() {
+									BeforeEach(func() {
+										fakeJob := new(dbfakes.FakeJob)
+										fakeJob.ConfigReturns(atc.JobConfig{
+											Vars: atc.JobVars{
+												"branch":   {Default: "main"},
+												"greeting": {Default: "hello"},
+											},
+										}, nil)
+
+										fakeBuild.JobIDReturns(1)
+										fakeBuild.JobReturns(fakeJob, true, nil)
+										fakeBuild.TriggerVarsReturns(map[string]any{
+											"branch": "feature-x",
+										})
+									})
+
+									It("seeds ((.:var)) values from defaults overlaid with trigger vars", func() {
+										state := <-invokedState
+
+										val, found, err := state.Get(vars.Reference{Source: ".", Path: "branch"})
+										Expect(err).ToNot(HaveOccurred())
+										Expect(found).To(BeTrue())
+										Expect(val).To(Equal("feature-x"))
+
+										val, found, err = state.Get(vars.Reference{Source: ".", Path: "greeting"})
+										Expect(err).ToNot(HaveOccurred())
+										Expect(found).To(BeTrue())
+										Expect(val).To(Equal("hello"))
+									})
+								})
+
 								Context("when the build is released", func() {
 									BeforeEach(func() {
 										readyToRelease := make(chan bool)

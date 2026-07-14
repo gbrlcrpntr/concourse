@@ -89,6 +89,7 @@ type Job interface {
 
 	ScheduleBuild(Build) (bool, error)
 	CreateBuild(createdBy string) (Build, error)
+	CreateBuildWithVars(createdBy string, triggerVars map[string]any) (Build, error)
 	RerunBuild(build Build, createdBy string) (Build, error)
 
 	RequestSchedule() error
@@ -836,6 +837,10 @@ func (j *job) GetPendingBuilds() ([]Build, error) {
 }
 
 func (j *job) CreateBuild(createdBy string) (Build, error) {
+	return j.CreateBuildWithVars(createdBy, nil)
+}
+
+func (j *job) CreateBuildWithVars(createdBy string, triggerVars map[string]any) (Build, error) {
 	tx, err := j.conn.Begin()
 	if err != nil {
 		return nil, err
@@ -848,8 +853,7 @@ func (j *job) CreateBuild(createdBy string) (Build, error) {
 		return nil, err
 	}
 
-	build := newEmptyBuild(j.conn, j.lockFactory)
-	err = createBuild(tx, build, map[string]any{
+	vals := map[string]any{
 		"name":               buildName,
 		"job_id":             j.id,
 		"pipeline_id":        j.pipelineID,
@@ -857,7 +861,18 @@ func (j *job) CreateBuild(createdBy string) (Build, error) {
 		"status":             BuildStatusPending,
 		"manually_triggered": true,
 		"created_by":         createdBy,
-	})
+	}
+
+	if len(triggerVars) > 0 {
+		marshaledVars, err := json.Marshal(triggerVars)
+		if err != nil {
+			return nil, err
+		}
+		vals["trigger_vars"] = marshaledVars
+	}
+
+	build := newEmptyBuild(j.conn, j.lockFactory)
+	err = createBuild(tx, build, vals)
 	if err != nil {
 		return nil, err
 	}
@@ -918,8 +933,7 @@ func (j *job) tryRerunBuild(buildToRerun Build, createdBy string) (Build, error)
 		return nil, err
 	}
 
-	rerunBuild := newEmptyBuild(j.conn, j.lockFactory)
-	err = createBuild(tx, rerunBuild, map[string]any{
+	vals := map[string]any{
 		"name":         rerunBuildName,
 		"job_id":       j.id,
 		"pipeline_id":  j.pipelineID,
@@ -928,7 +942,20 @@ func (j *job) tryRerunBuild(buildToRerun Build, createdBy string) (Build, error)
 		"rerun_of":     buildToRerunID,
 		"rerun_number": rerunNumber,
 		"created_by":   createdBy,
-	})
+	}
+
+	// Preserve only the original build's explicit overrides. Job var defaults
+	// are deliberately resolved from the current job config at execution time.
+	if triggerVars := buildToRerun.TriggerVars(); len(triggerVars) > 0 {
+		marshaledVars, err := json.Marshal(triggerVars)
+		if err != nil {
+			return nil, err
+		}
+		vals["trigger_vars"] = marshaledVars
+	}
+
+	rerunBuild := newEmptyBuild(j.conn, j.lockFactory)
+	err = createBuild(tx, rerunBuild, vals)
 	if err != nil {
 		return nil, err
 	}

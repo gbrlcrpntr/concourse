@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/go-multierror"
@@ -119,11 +120,10 @@ func (i interpolator) Interpolate(node any, tracker varsTracker) (any, error) {
 					return foundVal, nil
 				}
 
-				switch foundVal.(type) {
-				case string, int, int16, int32, int64, uint, uint16, uint32, uint64, json.Number:
-					foundValStr := fmt.Sprintf("%v", foundVal)
+				foundValStr, ok := interpolationString(foundVal)
+				if ok {
 					typedNode = strings.ReplaceAll(typedNode, fmt.Sprintf("((%s))", name), foundValStr)
-				default:
+				} else {
 					return nil, InvalidInterpolationError{
 						Name:  name,
 						Value: foundVal,
@@ -146,6 +146,43 @@ func (i interpolator) extractVarNames(value string) []string {
 	}
 
 	return names
+}
+
+func interpolationString(value any) (string, bool) {
+	switch typedValue := value.(type) {
+	case string:
+		return typedValue, true
+	case bool:
+		return strconv.FormatBool(typedValue), true
+	case int:
+		return strconv.FormatInt(int64(typedValue), 10), true
+	case int8:
+		return strconv.FormatInt(int64(typedValue), 10), true
+	case int16:
+		return strconv.FormatInt(int64(typedValue), 10), true
+	case int32:
+		return strconv.FormatInt(int64(typedValue), 10), true
+	case int64:
+		return strconv.FormatInt(typedValue, 10), true
+	case uint:
+		return strconv.FormatUint(uint64(typedValue), 10), true
+	case uint8:
+		return strconv.FormatUint(uint64(typedValue), 10), true
+	case uint16:
+		return strconv.FormatUint(uint64(typedValue), 10), true
+	case uint32:
+		return strconv.FormatUint(uint64(typedValue), 10), true
+	case uint64:
+		return strconv.FormatUint(typedValue, 10), true
+	case float32:
+		return strconv.FormatFloat(float64(typedValue), 'f', -1, 32), true
+	case float64:
+		return strconv.FormatFloat(typedValue, 'f', -1, 64), true
+	case json.Number:
+		return typedValue.String(), true
+	default:
+		return "", false
+	}
 }
 
 type varsTracker struct {

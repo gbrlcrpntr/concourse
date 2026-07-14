@@ -405,6 +405,16 @@ type FakeBuildForAPI struct {
 	teamNameReturnsOnCall map[int]struct {
 		result1 string
 	}
+	TriggerVarsStub        func() map[string]any
+	triggerVarsMutex       sync.RWMutex
+	triggerVarsArgsForCall []struct {
+	}
+	triggerVarsReturns struct {
+		result1 map[string]any
+	}
+	triggerVarsReturnsOnCall map[int]struct {
+		result1 map[string]any
+	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
 }
@@ -2421,6 +2431,59 @@ func (fake *FakeBuildForAPI) TeamNameReturnsOnCall(i int, result1 string) {
 	}
 	fake.teamNameReturnsOnCall[i] = struct {
 		result1 string
+	}{result1}
+}
+
+func (fake *FakeBuildForAPI) TriggerVars() map[string]any {
+	fake.triggerVarsMutex.Lock()
+	ret, specificReturn := fake.triggerVarsReturnsOnCall[len(fake.triggerVarsArgsForCall)]
+	fake.triggerVarsArgsForCall = append(fake.triggerVarsArgsForCall, struct {
+	}{})
+	stub := fake.TriggerVarsStub
+	fakeReturns := fake.triggerVarsReturns
+	fake.recordInvocation("TriggerVars", []interface{}{})
+	fake.triggerVarsMutex.Unlock()
+	if stub != nil {
+		return stub()
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeBuildForAPI) TriggerVarsCallCount() int {
+	fake.triggerVarsMutex.RLock()
+	defer fake.triggerVarsMutex.RUnlock()
+	return len(fake.triggerVarsArgsForCall)
+}
+
+func (fake *FakeBuildForAPI) TriggerVarsCalls(stub func() map[string]any) {
+	fake.triggerVarsMutex.Lock()
+	defer fake.triggerVarsMutex.Unlock()
+	fake.TriggerVarsStub = stub
+}
+
+func (fake *FakeBuildForAPI) TriggerVarsReturns(result1 map[string]any) {
+	fake.triggerVarsMutex.Lock()
+	defer fake.triggerVarsMutex.Unlock()
+	fake.TriggerVarsStub = nil
+	fake.triggerVarsReturns = struct {
+		result1 map[string]any
+	}{result1}
+}
+
+func (fake *FakeBuildForAPI) TriggerVarsReturnsOnCall(i int, result1 map[string]any) {
+	fake.triggerVarsMutex.Lock()
+	defer fake.triggerVarsMutex.Unlock()
+	fake.TriggerVarsStub = nil
+	if fake.triggerVarsReturnsOnCall == nil {
+		fake.triggerVarsReturnsOnCall = make(map[int]struct {
+			result1 map[string]any
+		})
+	}
+	fake.triggerVarsReturnsOnCall[i] = struct {
+		result1 map[string]any
 	}{result1}
 }
 

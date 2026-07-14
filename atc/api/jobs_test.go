@@ -1,11 +1,13 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/concourse/concourse/atc"
@@ -1421,7 +1423,7 @@ var _ = Describe("Jobs API", func() {
 					})
 
 					It("does not trigger the build", func() {
-						Expect(fakeJob.CreateBuildCallCount()).To(Equal(0))
+						Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
 					})
 				})
 
@@ -1432,7 +1434,7 @@ var _ = Describe("Jobs API", func() {
 
 					Context("when triggering the build fails", func() {
 						BeforeEach(func() {
-							fakeJob.CreateBuildReturns(nil, errors.New("nopers"))
+							fakeJob.CreateBuildWithVarsReturns(nil, errors.New("nopers"))
 						})
 						It("returns a 500", func() {
 							Expect(response.StatusCode).To(Equal(http.StatusInternalServerError))
@@ -1451,14 +1453,363 @@ var _ = Describe("Jobs API", func() {
 							build.StartTimeReturns(time.Unix(1, 0))
 							build.EndTimeReturns(time.Unix(100, 0))
 
-							fakeJob.CreateBuildReturns(build, nil)
+							fakeJob.CreateBuildWithVarsReturns(build, nil)
 						})
 
 						It("triggers the build", func() {
-							Expect(fakeJob.CreateBuildCallCount()).To(Equal(1))
+							Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(1))
+						})
+
+						It("passes no trigger vars when the body is empty", func() {
+							Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(1))
+							_, triggerVars := fakeJob.CreateBuildWithVarsArgsForCall(0)
+							Expect(triggerVars).To(BeEmpty())
+						})
+					})
+
+					Context("when the job declares vars", func() {
+						BeforeEach(func() {
+							fakeJob.ConfigReturns(atc.JobConfig{
+								Vars: atc.JobVars{
+									"branch":      {Default: "main"},
+									"environment": {Required: true},
+								},
+							}, nil)
+
+							build := new(dbfakes.FakeBuild)
+							build.IDReturns(42)
+							fakeJob.CreateBuildWithVarsReturns(build, nil)
+						})
+
+						Context("when the body overrides declared vars", func() {
+							BeforeEach(func() {
+								payload := `{"vars":{"branch":"feature-x","environment":"prod"}}`
+								request.Body = io.NopCloser(bytes.NewBufferString(payload))
+								request.ContentLength = int64(len(payload))
+							})
+
+							It("returns 200 and passes the vars to CreateBuild", func() {
+								Expect(response.StatusCode).To(Equal(http.StatusOK))
+								Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(1))
+								_, triggerVars := fakeJob.CreateBuildWithVarsArgsForCall(0)
+								Expect(triggerVars).To(Equal(map[string]any{
+									"branch":      "feature-x",
+									"environment": "prod",
+								}))
+							})
+						})
+
+						Context("when the body contains an undeclared var", func() {
+							BeforeEach(func() {
+								payload := `{"vars":{"bogus":"x","environment":"prod"}}`
+								request.Body = io.NopCloser(bytes.NewBufferString(payload))
+								request.ContentLength = int64(len(payload))
+							})
+
+							It("returns 400 naming the var and does not create a build", func() {
+								Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+								body, err := io.ReadAll(response.Body)
+								Expect(err).NotTo(HaveOccurred())
+								Expect(string(body)).To(ContainSubstring("undeclared var(s): bogus"))
+								Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+							})
+						})
+
+						Context("when a required var is missing", func() {
+							BeforeEach(func() {
+								payload := `{"vars":{"branch":"feature-x"}}`
+								request.Body = io.NopCloser(bytes.NewBufferString(payload))
+								request.ContentLength = int64(len(payload))
+							})
+
+							It("returns 400 naming the var", func() {
+								Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+								body, err := io.ReadAll(response.Body)
+								Expect(err).NotTo(HaveOccurred())
+								Expect(string(body)).To(ContainSubstring("missing required var(s): environment"))
+								Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+							})
+						})
+
+						Context("when the body contains a null var override", func() {
+							BeforeEach(func() {
+								payload := `{"vars":{"branch":null,"environment":"prod"}}`
+								request.Body = io.NopCloser(bytes.NewBufferString(payload))
+								request.ContentLength = int64(len(payload))
+							})
+
+							It("returns 400 naming the var", func() {
+								Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+								body, err := io.ReadAll(response.Body)
+								Expect(err).NotTo(HaveOccurred())
+								Expect(string(body)).To(ContainSubstring("var 'branch' must not be null; omit it instead"))
+								Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+							})
+						})
+
+						Context("when the body is malformed", func() {
+							BeforeEach(func() {
+								payload := `{"vars":`
+								request.Body = io.NopCloser(bytes.NewBufferString(payload))
+								request.ContentLength = int64(len(payload))
+							})
+
+							It("returns 400", func() {
+								Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+								Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+							})
 						})
 					})
 				})
+			})
+		})
+	})
+
+	Describe("POST /api/v1/teams/:team_name/pipelines/:pipeline_name/jobs/:job_name/builds/webhook", func() {
+		var response *http.Response
+		var payload string
+		var queryParams string
+
+		BeforeEach(func() {
+			payload = `{
+				"action": "opened",
+				"pull_request": {"head": {"ref": "pr-branch", "sha": "abc123"}}
+			}`
+			queryParams = "?webhook_token=wh-token&name=github-pr"
+
+			fakeJob.NameReturns("some-job")
+			fakeJob.ConfigReturns(atc.JobConfig{
+				Vars: atc.JobVars{
+					"branch":   {Default: "main"},
+					"greeting": {Default: "hello"},
+				},
+				TriggerWebhooks: []atc.TriggerWebhook{
+					{
+						Name:   "github-pr",
+						Token:  "wh-token",
+						Filter: map[string]any{"action": "opened"},
+						VarMapping: map[string]string{
+							"branch": "pull_request.head.ref",
+						},
+					},
+				},
+			}, nil)
+			fakePipeline.JobReturns(fakeJob, true, nil)
+
+			build := new(dbfakes.FakeBuild)
+			build.IDReturns(42)
+			fakeJob.CreateBuildWithVarsReturns(build, nil)
+		})
+
+		JustBeforeEach(func() {
+			request, err := http.NewRequest(
+				"POST",
+				server.URL+"/api/v1/teams/some-team/pipelines/some-pipeline/jobs/some-job/builds/webhook"+queryParams,
+				bytes.NewBufferString(payload),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			request.Header.Set("Content-Type", "application/json")
+
+			response, err = client.Do(request)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		Context("when the token matches and the filter matches", func() {
+			It("returns 201 and creates a build with the mapped vars", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusCreated))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(1))
+				createdBy, triggerVars := fakeJob.CreateBuildWithVarsArgsForCall(0)
+				Expect(createdBy).To(Equal("webhook:github-pr"))
+				Expect(triggerVars).To(Equal(map[string]any{
+					"branch": "pr-branch",
+				}))
+			})
+		})
+
+		Context("when the hook name is omitted and only one hook is configured", func() {
+			BeforeEach(func() {
+				queryParams = "?webhook_token=wh-token"
+			})
+
+			It("uses the sole configured hook", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusCreated))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(1))
+			})
+		})
+
+		Context("when the filter does not match", func() {
+			BeforeEach(func() {
+				payload = `{
+					"action": "closed",
+					"pull_request": {"head": {"ref": "pr-branch"}}
+				}`
+			})
+
+			It("returns 200 skipped and does not create a build", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusOK))
+				body, err := io.ReadAll(response.Body)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(body)).To(ContainSubstring(`"skipped": true`))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("when the token does not match", func() {
+			BeforeEach(func() {
+				queryParams = "?webhook_token=wrong&name=github-pr"
+			})
+
+			It("returns 401", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusUnauthorized))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("when the token is missing", func() {
+			BeforeEach(func() {
+				queryParams = "?name=github-pr"
+			})
+
+			It("returns 400", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("when no hook matches the given name", func() {
+			BeforeEach(func() {
+				queryParams = "?webhook_token=wh-token&name=bogus"
+			})
+
+			It("returns 400", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("when the job has no trigger webhooks", func() {
+			BeforeEach(func() {
+				fakeJob.ConfigReturns(atc.JobConfig{}, nil)
+			})
+
+			It("returns 400", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("when the mapped payload path is missing", func() {
+			Context("and the var has a default", func() {
+				BeforeEach(func() {
+					payload = `{"action": "opened"}`
+				})
+
+				It("omits the var so the default applies", func() {
+					Expect(response.StatusCode).To(Equal(http.StatusCreated))
+					Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(1))
+					_, triggerVars := fakeJob.CreateBuildWithVarsArgsForCall(0)
+					Expect(triggerVars).To(BeEmpty())
+				})
+			})
+
+			Context("and the var is required", func() {
+				BeforeEach(func() {
+					fakeJob.ConfigReturns(atc.JobConfig{
+						Vars: atc.JobVars{
+							"branch": {Required: true},
+						},
+						TriggerWebhooks: []atc.TriggerWebhook{
+							{
+								Name:       "github-pr",
+								Token:      "wh-token",
+								VarMapping: map[string]string{"branch": "pull_request.head.ref"},
+							},
+						},
+					}, nil)
+					payload = `{"action": "opened"}`
+				})
+
+				It("returns 400", func() {
+					Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+					body, err := io.ReadAll(response.Body)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(string(body)).To(ContainSubstring("pull_request.head.ref"))
+					Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+				})
+			})
+
+			Context("and the var is optional without a default", func() {
+				BeforeEach(func() {
+					fakeJob.ConfigReturns(atc.JobConfig{
+						Vars: atc.JobVars{
+							"branch": {},
+						},
+						TriggerWebhooks: []atc.TriggerWebhook{
+							{
+								Name:       "github-pr",
+								Token:      "wh-token",
+								VarMapping: map[string]string{"branch": "pull_request.head.ref"},
+							},
+						},
+					}, nil)
+					payload = `{"action": "opened"}`
+				})
+
+				It("omits the var", func() {
+					Expect(response.StatusCode).To(Equal(http.StatusCreated))
+					Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(1))
+					_, triggerVars := fakeJob.CreateBuildWithVarsArgsForCall(0)
+					Expect(triggerVars).To(BeEmpty())
+				})
+			})
+		})
+
+		Context("when the mapped payload value is null", func() {
+			BeforeEach(func() {
+				payload = `{
+					"action": "opened",
+					"pull_request": {"head": {"ref": null}}
+				}`
+			})
+
+			It("returns 400 naming the var", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+				body, err := io.ReadAll(response.Body)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(body)).To(ContainSubstring("var 'branch' must not be null; omit it instead"))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("when the payload is not JSON", func() {
+			BeforeEach(func() {
+				payload = `not-json`
+			})
+
+			It("returns 400", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("when the payload exceeds one MiB", func() {
+			BeforeEach(func() {
+				payload = `{"padding":"` + strings.Repeat("x", (1<<20)+1) + `"}`
+			})
+
+			It("returns 400 without creating a build", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("when the job is not found", func() {
+			BeforeEach(func() {
+				fakePipeline.JobReturns(nil, false, nil)
+			})
+
+			It("returns 404", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusNotFound))
 			})
 		})
 	})

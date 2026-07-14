@@ -27,10 +27,21 @@ func NewRunState(
 	stepper Stepper,
 	credVars vars.Variables,
 ) RunState {
+	return NewRunStateWithLocalVars(stepper, credVars, nil)
+}
+
+// NewRunStateWithLocalVars constructs a run state with pre-populated local
+// variables. Job builds use this to seed declared trigger vars before the plan
+// begins executing.
+func NewRunStateWithLocalVars(
+	stepper Stepper,
+	credVars vars.Variables,
+	seededLocalVars vars.StaticVariables,
+) RunState {
 	return &runState{
 		stepper: stepper,
 
-		vars: newBuildVariables(credVars),
+		vars: newBuildVariables(credVars, seededLocalVars),
 
 		artifacts: build.NewRepository(),
 		results:   &sync.Map{},

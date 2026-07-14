@@ -13,6 +13,9 @@ type JobConfig struct {
 	RawMaxInFlight       int      `json:"max_in_flight,omitempty"`
 	Tags                 Tags     `json:"tags,omitempty"`
 
+	Vars            JobVars          `json:"vars,omitempty"`
+	TriggerWebhooks []TriggerWebhook `json:"trigger_webhooks,omitempty"`
+
 	// Deprecated: users should use BuildLogRetention
 	BuildLogsToRetain int `json:"build_logs_to_retain,omitempty"`
 

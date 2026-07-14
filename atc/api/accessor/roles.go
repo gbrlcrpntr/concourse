@@ -25,6 +25,7 @@ var DefaultRoles = map[string]string{
 	atc.GetBuildPreparation:            ViewerRole,
 	atc.GetJob:                         ViewerRole,
 	atc.CreateJobBuild:                 OperatorRole,
+	atc.CreateJobBuildWebhook:          OperatorRole,
 	atc.RerunJobBuild:                  OperatorRole,
 	atc.SetBuildComment:                OperatorRole,
 	atc.ListAllJobs:                    ViewerRole,

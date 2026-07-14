@@ -2577,4 +2577,181 @@ var _ = Describe("ValidateConfig", func() {
 			})
 		})
 	})
+
+	Describe("job vars", func() {
+		Context("when a job declares valid vars", func() {
+			BeforeEach(func() {
+				config.Jobs[0].Vars = atc.JobVars{
+					"branch":      {Default: "main", Description: "branch to build"},
+					"dry_run":     {Type: atc.JobVarTypeBoolean, Default: false},
+					"environment": {Type: atc.JobVarTypeEnum, Options: []string{"dev", "prod"}, Required: true},
+					"replicas":    {Type: atc.JobVarTypeNumber, Default: 3},
+				}
+			})
+
+			It("returns no error", func() {
+				Expect(errorMessages).To(HaveLen(0))
+			})
+		})
+
+		Context("when a job var has an invalid identifier", func() {
+			BeforeEach(func() {
+				config.Jobs[0].Vars = atc.JobVars{
+					"_branch": {Default: "main"},
+				}
+			})
+
+			It("returns a warning", func() {
+				Expect(warnings).To(HaveLen(1))
+				Expect(warnings[0].Message).To(ContainSubstring("'_branch' is not a valid identifier"))
+			})
+		})
+
+		Context("when a required job var declares a default", func() {
+			BeforeEach(func() {
+				config.Jobs[0].Vars = atc.JobVars{
+					"branch": {Default: "main", Required: true},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(HaveLen(1))
+				Expect(errorMessages[0]).To(ContainSubstring("jobs.some-job.vars.branch is required and so must not declare a default"))
+			})
+		})
+
+		Context("when a job var declares an unsupported type", func() {
+			BeforeEach(func() {
+				config.Jobs[0].Vars = atc.JobVars{
+					"branch": {Type: atc.JobVarType("integer")},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(HaveLen(1))
+				Expect(errorMessages[0]).To(ContainSubstring("jobs.some-job.vars.branch has unsupported type 'integer'"))
+			})
+		})
+
+		Context("when an enum var has no options", func() {
+			BeforeEach(func() {
+				config.Jobs[0].Vars = atc.JobVars{
+					"environment": {Type: atc.JobVarTypeEnum},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(HaveLen(1))
+				Expect(errorMessages[0]).To(ContainSubstring("jobs.some-job.vars.environment has type enum but no options"))
+			})
+		})
+
+		Context("when a non-enum var declares options", func() {
+			BeforeEach(func() {
+				config.Jobs[0].Vars = atc.JobVars{
+					"branch": {Options: []string{"main", "dev"}},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(HaveLen(1))
+				Expect(errorMessages[0]).To(ContainSubstring("jobs.some-job.vars.branch.options is only valid for type enum"))
+			})
+		})
+
+		Context("when a typed default does not match the declared type", func() {
+			BeforeEach(func() {
+				config.Jobs[0].Vars = atc.JobVars{
+					"replicas": {Type: atc.JobVarTypeNumber, Default: "three"},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(HaveLen(1))
+				Expect(errorMessages[0]).To(ContainSubstring("jobs.some-job.vars.replicas default expects number, got string"))
+			})
+		})
+	})
+
+	Describe("job trigger webhooks", func() {
+		BeforeEach(func() {
+			config.Jobs[0].Vars = atc.JobVars{
+				"branch": {Default: "main"},
+			}
+		})
+
+		Context("when a webhook is valid", func() {
+			BeforeEach(func() {
+				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
+					{
+						Name:       "pr-open",
+						Token:      "some-token",
+						Filter:     map[string]any{"action": "opened"},
+						VarMapping: map[string]string{"branch": "pull_request.head.ref"},
+					},
+				}
+			})
+
+			It("returns no error", func() {
+				Expect(errorMessages).To(HaveLen(0))
+			})
+		})
+
+		Context("when a webhook has no name", func() {
+			BeforeEach(func() {
+				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
+					{Token: "some-token"},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(HaveLen(1))
+				Expect(errorMessages[0]).To(ContainSubstring("jobs.some-job.trigger_webhooks[0] has no name"))
+			})
+		})
+
+		Context("when two webhooks have the same name", func() {
+			BeforeEach(func() {
+				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
+					{Name: "pr-open", Token: "some-token"},
+					{Name: "pr-open", Token: "some-other-token"},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(HaveLen(1))
+				Expect(errorMessages[0]).To(ContainSubstring("jobs.some-job.trigger_webhooks[1] has a duplicate name ('pr-open')"))
+			})
+		})
+
+		Context("when a webhook has no token", func() {
+			BeforeEach(func() {
+				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
+					{Name: "pr-open"},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(HaveLen(1))
+				Expect(errorMessages[0]).To(ContainSubstring("jobs.some-job.trigger_webhooks[0] has no token"))
+			})
+		})
+
+		Context("when a webhook maps an undeclared var", func() {
+			BeforeEach(func() {
+				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
+					{
+						Name:       "pr-open",
+						Token:      "some-token",
+						VarMapping: map[string]string{"bogus": "pull_request.head.ref"},
+					},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(HaveLen(1))
+				Expect(errorMessages[0]).To(ContainSubstring("jobs.some-job.trigger_webhooks[0].var_mapping refers to undeclared var 'bogus'"))
+			})
+		})
+	})
 })

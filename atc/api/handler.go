@@ -102,7 +102,7 @@ func NewHandler(
 	teamHandlerFactory := NewTeamScopedHandlerFactory(logger, dbTeamFactory)
 
 	buildServer := buildserver.NewServer(logger, externalURL, dbTeamFactory, dbBuildFactory, eventHandlerFactory)
-	jobServer := jobserver.NewServer(logger, externalURL, secretManager, dbJobFactory)
+	jobServer := jobserver.NewServer(logger, externalURL, secretManager, varSourcePool, dbJobFactory)
 	resourceServer := resourceserver.NewServer(logger, secretManager, varSourcePool, dbCheckFactory, dbResourceFactory, dbResourceConfigFactory)
 
 	versionServer := versionserver.NewServer(logger, externalURL)
@@ -143,18 +143,19 @@ func NewHandler(
 		atc.ListBuildArtifacts:  buildHandlerFactory.HandlerFor(buildServer.GetBuildArtifacts),
 		atc.SetBuildComment:     buildHandlerFactory.HandlerFor(buildServer.SetBuildComment),
 
-		atc.ListAllJobs:    http.HandlerFunc(jobServer.ListAllJobs),
-		atc.ListJobs:       pipelineHandlerFactory.HandlerFor(jobServer.ListJobs),
-		atc.GetJob:         pipelineHandlerFactory.HandlerFor(jobServer.GetJob),
-		atc.ListJobBuilds:  pipelineHandlerFactory.HandlerFor(jobServer.ListJobBuilds),
-		atc.ListJobInputs:  pipelineHandlerFactory.HandlerFor(jobServer.ListJobInputs),
-		atc.GetJobBuild:    pipelineHandlerFactory.HandlerFor(jobServer.GetJobBuild),
-		atc.CreateJobBuild: pipelineHandlerFactory.HandlerFor(jobServer.CreateJobBuild),
-		atc.RerunJobBuild:  pipelineHandlerFactory.HandlerFor(jobServer.RerunJobBuild),
-		atc.PauseJob:       pipelineHandlerFactory.HandlerFor(jobServer.PauseJob),
-		atc.UnpauseJob:     pipelineHandlerFactory.HandlerFor(jobServer.UnpauseJob),
-		atc.ScheduleJob:    pipelineHandlerFactory.HandlerFor(jobServer.ScheduleJob),
-		atc.JobBadge:       pipelineHandlerFactory.HandlerFor(jobServer.JobBadge),
+		atc.ListAllJobs:           http.HandlerFunc(jobServer.ListAllJobs),
+		atc.ListJobs:              pipelineHandlerFactory.HandlerFor(jobServer.ListJobs),
+		atc.GetJob:                pipelineHandlerFactory.HandlerFor(jobServer.GetJob),
+		atc.ListJobBuilds:         pipelineHandlerFactory.HandlerFor(jobServer.ListJobBuilds),
+		atc.ListJobInputs:         pipelineHandlerFactory.HandlerFor(jobServer.ListJobInputs),
+		atc.GetJobBuild:           pipelineHandlerFactory.HandlerFor(jobServer.GetJobBuild),
+		atc.CreateJobBuild:        pipelineHandlerFactory.HandlerFor(jobServer.CreateJobBuild),
+		atc.CreateJobBuildWebhook: pipelineHandlerFactory.HandlerFor(jobServer.CreateJobBuildWebhook),
+		atc.RerunJobBuild:         pipelineHandlerFactory.HandlerFor(jobServer.RerunJobBuild),
+		atc.PauseJob:              pipelineHandlerFactory.HandlerFor(jobServer.PauseJob),
+		atc.UnpauseJob:            pipelineHandlerFactory.HandlerFor(jobServer.UnpauseJob),
+		atc.ScheduleJob:           pipelineHandlerFactory.HandlerFor(jobServer.ScheduleJob),
+		atc.JobBadge:              pipelineHandlerFactory.HandlerFor(jobServer.JobBadge),
 		atc.MainJobBadge: mainredirect.Handler{
 			Routes: atc.Routes,
 			Route:  atc.JobBadge,
@@ -219,7 +220,7 @@ func NewHandler(
 		atc.DownloadCLI:  http.HandlerFunc(cliServer.Download),
 		atc.GetInfo:      http.HandlerFunc(infoServer.Info),
 		atc.GetInfoCreds: http.HandlerFunc(infoServer.Creds),
-		atc.GetHealth: http.HandlerFunc(healthServer.GetHealth),
+		atc.GetHealth:    http.HandlerFunc(healthServer.GetHealth),
 
 		atc.GetUser:              http.HandlerFunc(usersServer.GetUser),
 		atc.ListActiveUsersSince: http.HandlerFunc(usersServer.GetUsersSince),

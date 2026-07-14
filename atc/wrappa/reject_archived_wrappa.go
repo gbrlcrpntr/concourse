@@ -27,6 +27,7 @@ func (rw *RejectArchivedWrappa) Wrap(handlers rata.Handlers) rata.Handlers {
 			atc.PausePipeline,
 			atc.UnpausePipeline,
 			atc.CreateJobBuild,
+			atc.CreateJobBuildWebhook,
 			atc.ScheduleJob,
 			atc.CheckResource,
 			atc.CheckResourceType,

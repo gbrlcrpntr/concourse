@@ -697,6 +697,37 @@ var _ = Describe("Job", func() {
 
 				Expect(job.ScheduleRequestedTime()).Should(BeTemporally(">", requestedSchedule))
 			})
+
+			It("persists trigger vars on the build", func() {
+				build, err := job.CreateBuildWithVars(defaultBuildCreatedBy, map[string]any{
+					"branch":   "feature-x",
+					"replicas": 3,
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(build.TriggerVars()).To(Equal(map[string]any{
+					"branch":   "feature-x",
+					"replicas": float64(3),
+				}))
+
+				reloaded, found, err := job.Build(build.Name())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(found).To(BeTrue())
+				Expect(reloaded.TriggerVars()).To(Equal(map[string]any{
+					"branch":   "feature-x",
+					"replicas": float64(3),
+				}))
+			})
+
+			It("leaves trigger vars empty when none are given", func() {
+				build, err := job.CreateBuild(defaultBuildCreatedBy)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(build.TriggerVars()).To(BeEmpty())
+
+				reloaded, found, err := job.Build(build.Name())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(found).To(BeTrue())
+				Expect(reloaded.TriggerVars()).To(BeEmpty())
+			})
 		})
 	})
 
@@ -742,6 +773,23 @@ var _ = Describe("Job", func() {
 				Expect(found).To(BeTrue())
 
 				Expect(job.ScheduleRequestedTime()).Should(BeTemporally(">", requestedSchedule))
+			})
+
+			Context("when the build being rerun has trigger vars", func() {
+				BeforeEach(func() {
+					var err error
+					buildToRerun, err = job.CreateBuildWithVars(defaultBuildCreatedBy, map[string]any{
+						"branch": "feature-x",
+					})
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("copies them onto the rerun build", func() {
+					Expect(rerunErr).ToNot(HaveOccurred())
+					Expect(rerunBuild.TriggerVars()).To(Equal(map[string]any{
+						"branch": "feature-x",
+					}))
+				})
 			})
 
 			Context("when there is an existing rerun build", func() {

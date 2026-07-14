@@ -2,8 +2,10 @@ package jobserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
+	"github.com/concourse/concourse/atc"
 	"github.com/concourse/concourse/atc/api/accessor"
 	"github.com/concourse/concourse/atc/api/present"
 	"github.com/concourse/concourse/atc/db"
@@ -33,15 +35,37 @@ func (s *Server) CreateJobBuild(pipeline db.Pipeline) http.Handler {
 			return
 		}
 
+		var body atc.CreateJobBuildRequestBody
+		if r.ContentLength != 0 {
+			err = json.NewDecoder(r.Body).Decode(&body)
+			if err != nil {
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("malformed request body: %s", err))
+				return
+			}
+		}
+
+		config, err := job.Config()
+		if err != nil {
+			logger.Error("failed-to-get-job-config", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		err = config.Vars.Validate(body.Vars)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		acc := accessor.GetAccessor(r)
-		build, err := job.CreateBuild(acc.UserInfo().DisplayUserId)
+		build, err := job.CreateBuildWithVars(acc.UserInfo().DisplayUserId, body.Vars)
 		if err != nil {
 			logger.Error("failed-to-create-job-build", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		err = json.NewEncoder(w).Encode(present.Build(build, nil, nil))
+		err = json.NewEncoder(w).Encode(present.Build(build, job, acc))
 		if err != nil {
 			logger.Error("failed-to-encode-build", err)
 			w.WriteHeader(http.StatusInternalServerError)

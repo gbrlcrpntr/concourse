@@ -52,6 +52,7 @@ type BuildForAPI interface {
 	RerunOfName() string
 	RerunNumber() int
 	CreatedBy() *string
+	TriggerVars() map[string]any
 
 	IsDrained() bool
 	IsRunning() bool

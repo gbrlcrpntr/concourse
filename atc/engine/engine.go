@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/concourse/concourse/atc/metric"
 	"github.com/concourse/concourse/atc/util"
 	"github.com/concourse/concourse/tracing"
+	"github.com/concourse/concourse/vars"
 )
 
 //go:generate go run github.com/maxbrunsfeld/counterfeiter/v6 -generate
@@ -342,8 +344,36 @@ func (b *engineBuild) runState(logger lager.Logger, stepper exec.Stepper) (exec.
 	if err != nil {
 		return nil, err
 	}
-	state, _ := b.trackedStates.LoadOrStore(id, exec.NewRunState(stepper, credVars))
+	seededVars, err := b.seededLocalVars()
+	if err != nil {
+		return nil, err
+	}
+	state, _ := b.trackedStates.LoadOrStore(id, exec.NewRunStateWithLocalVars(stepper, credVars, seededVars))
 	return state.(exec.RunState), nil
+}
+
+// seededLocalVars resolves the initial ((.:var)) values for a job build: the
+// job's declared var defaults overlaid with the build's trigger-time
+// overrides. One-off and check builds have no job and are not seeded.
+func (b *engineBuild) seededLocalVars() (vars.StaticVariables, error) {
+	if b.build.JobID() == 0 {
+		return nil, nil
+	}
+
+	job, found, err := b.build.Job()
+	if err != nil {
+		return nil, fmt.Errorf("failed to find job: %w", err)
+	}
+	if !found {
+		return nil, errors.New("job not found")
+	}
+
+	config, err := job.Config()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get job config: %w", err)
+	}
+
+	return vars.StaticVariables(config.Vars.Merge(b.build.TriggerVars())), nil
 }
 
 func (b *engineBuild) clearRunState() {

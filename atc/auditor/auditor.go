@@ -80,6 +80,7 @@ func (a *auditor) ValidateAction(action string) bool {
 		return a.EnableContainerAuditLog
 	case atc.GetJob,
 		atc.CreateJobBuild,
+		atc.CreateJobBuildWebhook,
 		atc.ListAllJobs,
 		atc.ListJobs,
 		atc.ListJobBuilds,

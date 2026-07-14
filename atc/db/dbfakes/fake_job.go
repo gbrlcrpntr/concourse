@@ -139,6 +139,20 @@ type FakeJob struct {
 		result1 db.Build
 		result2 error
 	}
+	CreateBuildWithVarsStub        func(string, map[string]any) (db.Build, error)
+	createBuildWithVarsMutex       sync.RWMutex
+	createBuildWithVarsArgsForCall []struct {
+		arg1 string
+		arg2 map[string]any
+	}
+	createBuildWithVarsReturns struct {
+		result1 db.Build
+		result2 error
+	}
+	createBuildWithVarsReturnsOnCall map[int]struct {
+		result1 db.Build
+		result2 error
+	}
 	DisableManualTriggerStub        func() bool
 	disableManualTriggerMutex       sync.RWMutex
 	disableManualTriggerArgsForCall []struct {
@@ -1152,6 +1166,71 @@ func (fake *FakeJob) CreateBuildReturnsOnCall(i int, result1 db.Build, result2 e
 		})
 	}
 	fake.createBuildReturnsOnCall[i] = struct {
+		result1 db.Build
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeJob) CreateBuildWithVars(arg1 string, arg2 map[string]any) (db.Build, error) {
+	fake.createBuildWithVarsMutex.Lock()
+	ret, specificReturn := fake.createBuildWithVarsReturnsOnCall[len(fake.createBuildWithVarsArgsForCall)]
+	fake.createBuildWithVarsArgsForCall = append(fake.createBuildWithVarsArgsForCall, struct {
+		arg1 string
+		arg2 map[string]any
+	}{arg1, arg2})
+	stub := fake.CreateBuildWithVarsStub
+	fakeReturns := fake.createBuildWithVarsReturns
+	fake.recordInvocation("CreateBuildWithVars", []interface{}{arg1, arg2})
+	fake.createBuildWithVarsMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *FakeJob) CreateBuildWithVarsCallCount() int {
+	fake.createBuildWithVarsMutex.RLock()
+	defer fake.createBuildWithVarsMutex.RUnlock()
+	return len(fake.createBuildWithVarsArgsForCall)
+}
+
+func (fake *FakeJob) CreateBuildWithVarsCalls(stub func(string, map[string]any) (db.Build, error)) {
+	fake.createBuildWithVarsMutex.Lock()
+	defer fake.createBuildWithVarsMutex.Unlock()
+	fake.CreateBuildWithVarsStub = stub
+}
+
+func (fake *FakeJob) CreateBuildWithVarsArgsForCall(i int) (string, map[string]any) {
+	fake.createBuildWithVarsMutex.RLock()
+	defer fake.createBuildWithVarsMutex.RUnlock()
+	argsForCall := fake.createBuildWithVarsArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeJob) CreateBuildWithVarsReturns(result1 db.Build, result2 error) {
+	fake.createBuildWithVarsMutex.Lock()
+	defer fake.createBuildWithVarsMutex.Unlock()
+	fake.CreateBuildWithVarsStub = nil
+	fake.createBuildWithVarsReturns = struct {
+		result1 db.Build
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeJob) CreateBuildWithVarsReturnsOnCall(i int, result1 db.Build, result2 error) {
+	fake.createBuildWithVarsMutex.Lock()
+	defer fake.createBuildWithVarsMutex.Unlock()
+	fake.CreateBuildWithVarsStub = nil
+	if fake.createBuildWithVarsReturnsOnCall == nil {
+		fake.createBuildWithVarsReturnsOnCall = make(map[int]struct {
+			result1 db.Build
+			result2 error
+		})
+	}
+	fake.createBuildWithVarsReturnsOnCall[i] = struct {
 		result1 db.Build
 		result2 error
 	}{result1, result2}

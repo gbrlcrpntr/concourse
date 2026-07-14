@@ -39,6 +39,7 @@ type Team interface {
 	JobBuild(pipelineRef atc.PipelineRef, jobName, buildName string) (atc.Build, bool, error)
 	JobBuilds(pipelineRef atc.PipelineRef, jobName string, page Page) ([]atc.Build, Pagination, bool, error)
 	CreateJobBuild(pipelineRef atc.PipelineRef, jobName string) (atc.Build, error)
+	CreateJobBuildWithVars(pipelineRef atc.PipelineRef, jobName string, buildVars map[string]any) (atc.Build, error)
 	RerunJobBuild(pipelineRef atc.PipelineRef, jobName string, buildName string) (atc.Build, error)
 	SetJobBuildComment(pipelineRef atc.PipelineRef, jobName string, buildName string, comment string) (bool, error)
 	ListJobs(pipelineRef atc.PipelineRef) ([]atc.Job, error)

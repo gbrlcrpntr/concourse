@@ -102,7 +102,8 @@ var buildsQuery = psql.Select(`
 		rb.name,
 		b.rerun_number,
 		b.span_context,
-		COALESCE(bc.comment, '')
+		COALESCE(bc.comment, ''),
+		b.trigger_vars
 	`).
 	From("builds b").
 	JoinClause("LEFT OUTER JOIN jobs j ON b.job_id = j.id").
@@ -164,6 +165,7 @@ type Build interface {
 	RerunOfName() string
 	RerunNumber() int
 	CreatedBy() *string
+	TriggerVars() map[string]any
 
 	LagerData() lager.Data
 	TracingAttrs() tracing.Attrs
@@ -260,7 +262,8 @@ type build struct {
 
 	isManuallyTriggered bool
 
-	createdBy *string
+	createdBy   *string
+	triggerVars map[string]any
 
 	rerunOf     int
 	rerunOfName string
@@ -404,6 +407,7 @@ func (b *build) RerunOf() int                     { return b.rerunOf }
 func (b *build) RerunOfName() string              { return b.rerunOfName }
 func (b *build) RerunNumber() int                 { return b.rerunNumber }
 func (b *build) CreatedBy() *string               { return b.createdBy }
+func (b *build) TriggerVars() map[string]any      { return b.triggerVars }
 
 func (b *build) isNewerThanLastCheckOf(input Resource) bool {
 	return b.createTime.After(input.LastCheckEndTime())
@@ -1911,7 +1915,7 @@ func scanBuild(b *build, row scannable, encryptionStrategy encryption.Strategy) 
 		nonce, spanContext, createdBy                                                     sql.NullString
 		drained, aborted, completed                                                       bool
 		status                                                                            string
-		pipelineInstanceVars, comment                                                     sql.NullString
+		pipelineInstanceVars, comment, triggerVars                                        sql.NullString
 	)
 
 	err := row.Scan(
@@ -1948,6 +1952,7 @@ func scanBuild(b *build, row scannable, encryptionStrategy encryption.Strategy) 
 		&rerunNumber,
 		&spanContext,
 		&comment,
+		&triggerVars,
 	)
 	if err != nil {
 		return err
@@ -2019,6 +2024,14 @@ func scanBuild(b *build, row scannable, encryptionStrategy encryption.Strategy) 
 
 	if createdBy.Valid {
 		b.createdBy = &createdBy.String
+	}
+
+	b.triggerVars = nil
+	if triggerVars.Valid {
+		err = json.Unmarshal([]byte(triggerVars.String), &b.triggerVars)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

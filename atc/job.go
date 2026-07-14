@@ -27,6 +27,10 @@ type Job struct {
 
 	Inputs  []JobInput  `json:"inputs,omitempty"`
 	Outputs []JobOutput `json:"outputs,omitempty"`
+
+	// Vars are the job's declared trigger-time vars; only populated on the
+	// single-job endpoint.
+	Vars JobVars `json:"vars,omitempty"`
 }
 
 type JobInput struct {

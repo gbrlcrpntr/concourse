@@ -266,6 +266,18 @@ dup-key: ((key3))
 		Expect(result).To(Equal([]byte("uri: nats://nats:secret@10.0.0.0:4222\n")))
 	})
 
+	It("can interpolate boolean and float values in the middle of a string", func() {
+		template := NewTemplate([]byte("flags: enabled=((enabled)), ratio=((ratio))"))
+		vars := StaticVariables{
+			"enabled": true,
+			"ratio":   2.5,
+		}
+
+		result, err := template.Evaluate(vars, EvaluateOpts{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal([]byte("flags: enabled=true, ratio=2.5\n")))
+	})
+
 	It("allows @ in a var name", func() {
 		template := NewTemplate([]byte("((\"foo/bar/me.com-test@me.com/password\"))"))
 		vars := StaticVariables{
@@ -290,16 +302,16 @@ dup-key: ((key3))
 	})
 
 	It("raises error when interpolating an unsupported type in the middle of a string", func() {
-		template := NewTemplate([]byte("address: ((definition)):((eulers_number))"))
+		template := NewTemplate([]byte("address: ((definition)):((details))"))
 		vars := StaticVariables{
-			"eulers_number": 2.717,
-			"definition":    "natural_log",
+			"definition": "natural_log",
+			"details":    map[string]any{"value": 2.717},
 		}
 
 		_, err := template.Evaluate(vars, EvaluateOpts{})
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("float64"))
-		Expect(err.Error()).To(ContainSubstring("eulers_number"))
+		Expect(err.Error()).To(ContainSubstring("map[string]interface {}"))
+		Expect(err.Error()).To(ContainSubstring("details"))
 	})
 
 	It("can interpolate a single key multiple times in the middle of a string", func() {

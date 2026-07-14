@@ -44,6 +44,7 @@ func Build(build db.BuildForAPI, job db.Job, access accessor.Access) atc.Build {
 	if showComments {
 		comment := build.Comment()
 		atcBuild.Comment = comment
+		atcBuild.TriggerVars = build.TriggerVars()
 	}
 
 	if build.RerunOf() != 0 {

@@ -200,6 +200,42 @@ var _ = Describe("RunState", func() {
 				Expect(mapit).ToNot(HaveKey("k3"))
 			})
 		})
+
+		Context("when local vars are seeded", func() {
+			BeforeEach(func() {
+				state = exec.NewRunStateWithLocalVars(stepper, credVars, vars.StaticVariables{
+					"branch": "main",
+				})
+			})
+
+			It("resolves seeded values as ((.:var))", func() {
+				val, found, err := state.Get(vars.Reference{Source: ".", Path: "branch"})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(found).To(BeTrue())
+				Expect(val).To(Equal("main"))
+			})
+
+			It("does not answer source-less refs from the seed", func() {
+				_, found, err := state.Get(vars.Reference{Path: "branch"})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(found).To(BeFalse())
+			})
+
+			It("lets AddLocalVar shadow a seeded value", func() {
+				state.AddLocalVar("branch", "overridden", false)
+				val, found, err := state.Get(vars.Reference{Source: ".", Path: "branch"})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(found).To(BeTrue())
+				Expect(val).To(Equal("overridden"))
+			})
+
+			It("does not track seeded values for redaction", func() {
+				state.Get(vars.Reference{Source: ".", Path: "branch"})
+				mapit := vars.TrackedVarsMap{}
+				state.IterateInterpolatedCreds(mapit)
+				Expect(mapit).ToNot(HaveKey("branch"))
+			})
+		})
 	})
 
 	Describe("List", func() {

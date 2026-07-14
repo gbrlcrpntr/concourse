@@ -49,10 +49,17 @@ func (s *Server) GetJob(pipeline db.Pipeline) http.Handler {
 
 		teamName := r.FormValue(":team_name")
 
+		config, err := job.Config()
+		if err != nil {
+			logger.Error("could-not-get-job-config", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
-		err = json.NewEncoder(w).Encode(present.Job(
+		presentedJob := present.Job(
 			teamName,
 			job,
 			accessor.GetAccessor(r),
@@ -61,7 +68,10 @@ func (s *Server) GetJob(pipeline db.Pipeline) http.Handler {
 			finished,
 			next,
 			nil,
-		))
+		)
+		presentedJob.Vars = config.Vars
+
+		err = json.NewEncoder(w).Encode(presentedJob)
 		if err != nil {
 			logger.Error("failed-to-encode-job", err)
 			w.WriteHeader(http.StatusInternalServerError)
