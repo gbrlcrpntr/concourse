@@ -17,6 +17,7 @@ import Browser.Navigation as Navigation
 import Concourse exposing (DatabaseID, encodeJob, encodePipeline, encodeTeam)
 import Concourse.BuildStatus exposing (BuildStatus)
 import Concourse.Pagination exposing (Page)
+import Dict exposing (Dict)
 import Json.Decode
 import Json.Encode
 import Maybe exposing (Maybe)
@@ -156,6 +157,7 @@ type Effect
     | GetCurrentTime
     | GetCurrentTimeZone
     | DoTriggerBuild Concourse.JobIdentifier
+    | DoTriggerBuildWithVars Concourse.JobIdentifier (Dict String Concourse.JsonValue)
     | RerunJobBuild Concourse.JobBuildIdentifier
     | SetBuildComment Int String
     | DoAbortBuild Int
@@ -397,6 +399,21 @@ runEffect effect key csrfToken =
             Api.post
                 (Endpoints.JobBuildsList |> Endpoints.Job id)
                 csrfToken
+                |> Api.expectJson Concourse.decodeBuild
+                |> Api.request
+                |> Task.attempt BuildTriggered
+
+        DoTriggerBuildWithVars id vars ->
+            Api.post
+                (Endpoints.JobBuildsList |> Endpoints.Job id)
+                csrfToken
+                |> Api.withJsonBody
+                    (Json.Encode.object
+                        [ ( "vars"
+                          , Json.Encode.dict identity Concourse.encodeJsonValue vars
+                          )
+                        ]
+                    )
                 |> Api.expectJson Concourse.decodeBuild
                 |> Api.request
                 |> Task.attempt BuildTriggered
@@ -954,6 +971,21 @@ toHtmlID domId =
 
         TriggerBuildButton ->
             "trigger-build-button"
+
+        TriggerBuildFormVarField varName ->
+            "trigger-build-form-var-" ++ varName
+
+        TriggerBuildFormUseSelectedBuildButton ->
+            "trigger-build-form-use-selected-build"
+
+        TriggerBuildFormResetButton ->
+            "trigger-build-form-reset"
+
+        TriggerBuildFormSubmitButton ->
+            "trigger-build-form-submit"
+
+        TriggerBuildFormCancelButton ->
+            "trigger-build-form-cancel"
 
         ToggleJobButton ->
             "toggle-job-button"

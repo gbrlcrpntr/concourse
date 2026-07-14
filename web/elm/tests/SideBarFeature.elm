@@ -2191,6 +2191,7 @@ iAmLookingAtAOneOffBuildPageOnANonPhoneScreen =
                     , job = Nothing
                     , status = BuildStatusStarted
                     , duration = { startedAt = Nothing, finishedAt = Nothing }
+                    , triggerVars = Dict.empty
                     , reapTime = Nothing
                     , createdBy = Nothing
                     , comment = ""

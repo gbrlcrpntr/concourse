@@ -8,6 +8,7 @@ import Build.Header.Models exposing (BuildPageType(..), CommentBarVisibility, Cu
 import Build.Output.Models exposing (OutputModel)
 import Concourse
 import Concourse.BuildStatus as BuildStatus
+import Dict exposing (Dict)
 import Keyboard
 import Login.Login as Login
 import Routes exposing (Highlight)
@@ -32,6 +33,11 @@ type alias Model =
                 , hasLoadedYet : Bool
                 , notFound : Bool
                 , reapTime : Maybe Time.Posix
+                , jobVars : List Concourse.JobVar
+                , selectedBuildTriggerVars : Dict String Concourse.JsonValue
+                , triggerFormVisible : Bool
+                , triggerFormValues : Dict String String
+                , triggerFormError : Maybe String
                 }
             )
         )
@@ -49,6 +55,10 @@ type alias ShortcutsModel r =
         , comment : CommentBarVisibility
         , status : BuildStatus.BuildStatus
         , isTriggerBuildKeyDown : Bool
+        , jobVars : List Concourse.JobVar
+        , triggerFormVisible : Bool
+        , triggerFormValues : Dict String String
+        , triggerFormError : Maybe String
         , duration : Concourse.BuildDuration
         , createdBy : Concourse.BuildCreatedBy
     }

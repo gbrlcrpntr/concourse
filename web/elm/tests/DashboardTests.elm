@@ -2058,6 +2058,7 @@ jobWithNameTransitionedAt jobName transitionedAt status =
                 { startedAt = Nothing
                 , finishedAt = Nothing
                 }
+            , triggerVars = Dict.empty
             , reapTime = Nothing
             , createdBy = Nothing
             , comment = ""
@@ -2075,6 +2076,7 @@ jobWithNameTransitionedAt jobName transitionedAt status =
                         { startedAt = Nothing
                         , finishedAt = Just <| t
                         }
+                    , triggerVars = Dict.empty
                     , reapTime = Nothing
                     , createdBy = Nothing
                     , comment = ""
@@ -2088,6 +2090,7 @@ jobWithNameTransitionedAt jobName transitionedAt status =
     , inputs = []
     , outputs = []
     , groups = []
+    , vars = []
     }
 
 
@@ -2110,6 +2113,7 @@ circularJobs =
                     { startedAt = Nothing
                     , finishedAt = Nothing
                     }
+                , triggerVars = Dict.empty
                 , reapTime = Nothing
                 , createdBy = Nothing
                 , comment = ""
@@ -2125,6 +2129,7 @@ circularJobs =
                     { startedAt = Nothing
                     , finishedAt = Just <| Time.millisToPosix 0
                     }
+                , triggerVars = Dict.empty
                 , reapTime = Nothing
                 , createdBy = Nothing
                 , comment = ""
@@ -2133,7 +2138,7 @@ circularJobs =
       , pausedBy = Nothing
       , pausedAt = Nothing
       , disableManualTrigger = False
-    , disableReruns = False
+      , disableReruns = False
       , inputs =
             [ { name = "inA"
               , resource = "res0"
@@ -2143,6 +2148,7 @@ circularJobs =
             ]
       , outputs = []
       , groups = []
+      , vars = []
       }
     , { name = "jobB"
       , pipelineId = 1
@@ -2161,6 +2167,7 @@ circularJobs =
                     { startedAt = Nothing
                     , finishedAt = Nothing
                     }
+                , triggerVars = Dict.empty
                 , reapTime = Nothing
                 , createdBy = Nothing
                 , comment = ""
@@ -2176,6 +2183,7 @@ circularJobs =
                     { startedAt = Nothing
                     , finishedAt = Just <| Time.millisToPosix 0
                     }
+                , triggerVars = Dict.empty
                 , reapTime = Nothing
                 , createdBy = Nothing
                 , comment = ""
@@ -2184,7 +2192,7 @@ circularJobs =
       , pausedBy = Nothing
       , pausedAt = Nothing
       , disableManualTrigger = False
-    , disableReruns = False
+      , disableReruns = False
       , inputs =
             [ { name = "inB"
               , resource = "res0"
@@ -2194,6 +2202,7 @@ circularJobs =
             ]
       , outputs = []
       , groups = []
+      , vars = []
       }
     ]
 

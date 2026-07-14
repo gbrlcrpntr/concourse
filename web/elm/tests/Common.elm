@@ -32,6 +32,7 @@ import Application.Application as Application
 import Concourse
 import Concourse.BuildStatus exposing (BuildStatus(..))
 import Data
+import Dict
 import EffectTransformer exposing (ET)
 import Expect exposing (Expectation)
 import Html
@@ -226,6 +227,7 @@ myBrowserFetchedTheBuild =
                         { startedAt = Nothing
                         , finishedAt = Nothing
                         }
+                    , triggerVars = Dict.empty
                     , reapTime = Nothing
                     , createdBy = Nothing
                     , comment = ""

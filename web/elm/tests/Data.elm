@@ -4,6 +4,7 @@ module Data exposing
     , elementPosition
     , featureFlags
     , flags
+    , httpBadRequest
     , httpForbidden
     , httpInternalServerError
     , httpNotFound
@@ -47,6 +48,7 @@ module Data exposing
     , withInstanceVars
     , withJob
     , withJobName
+    , withJobVars
     , withLastChecked
     , withLastUpdatedAt
     , withName
@@ -64,6 +66,7 @@ module Data exposing
     , withShortPipelineId
     , withShortResourceId
     , withTeamName
+    , withTriggerVars
     )
 
 import Application.Application as Application
@@ -76,6 +79,20 @@ import Http
 import Json.Encode
 import Test.Html.Event as Event
 import Time
+
+
+httpBadRequest : Result Http.Error a
+httpBadRequest =
+    Err <|
+        Http.BadStatus
+            { url = "http://example.com"
+            , status =
+                { code = 400
+                , message = ""
+                }
+            , headers = Dict.empty
+            , body = "{\"error\":\"undeclared var(s): nope\"}"
+            }
 
 
 httpUnauthorized : Result Http.Error a
@@ -280,7 +297,13 @@ job pipelineID =
     , inputs = []
     , outputs = []
     , groups = []
+    , vars = []
     }
+
+
+withJobVars : List Concourse.JobVar -> { r | vars : List Concourse.JobVar } -> { r | vars : List Concourse.JobVar }
+withJobVars vars j =
+    { j | vars = vars }
 
 
 withDisableManualTrigger : Bool -> { r | disableManualTrigger : Bool } -> { r | disableManualTrigger : Bool }
@@ -296,6 +319,11 @@ withDisableReruns disableReruns p =
 withTeamName : String -> { r | teamName : String } -> { r | teamName : String }
 withTeamName name p =
     { p | teamName = name }
+
+
+withTriggerVars : Dict String Concourse.JsonValue -> { r | triggerVars : Dict String Concourse.JsonValue } -> { r | triggerVars : Dict String Concourse.JsonValue }
+withTriggerVars triggerVars buildRecord =
+    { buildRecord | triggerVars = triggerVars }
 
 
 withPipelineName : String -> { r | pipelineName : String } -> { r | pipelineName : String }
@@ -534,6 +562,7 @@ build status =
             else
                 Just <| Time.millisToPosix 0
         }
+    , triggerVars = Dict.empty
     , reapTime = Nothing
     , createdBy = Just <| "some-one"
     , comment = "Test Comment"
@@ -567,6 +596,7 @@ jobBuild status =
             else
                 Just <| Time.millisToPosix 0
         }
+    , triggerVars = Dict.empty
     , reapTime = Nothing
     , createdBy = Just <| "some-one"
     , comment = "Test Comment"

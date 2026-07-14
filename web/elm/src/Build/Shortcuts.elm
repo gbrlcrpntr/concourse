@@ -3,6 +3,7 @@ module Build.Shortcuts exposing (handleDelivery, keyboardHelp)
 import Build.Header.Models exposing (CommentBarVisibility(..), HistoryItem)
 import Build.Models exposing (ShortcutsModel)
 import Concourse.BuildStatus
+import Dict
 import EffectTransformer exposing (ET)
 import Html exposing (Html)
 import Html.Attributes exposing (class, classList)
@@ -200,11 +201,22 @@ handleKeyPressed keyEvent ( model, effects ) =
 
             ( Keyboard.T, True ) ->
                 if not newModel.isTriggerBuildKeyDown then
-                    (newModel.job
-                        |> Maybe.map (DoTriggerBuild >> (::) >> Tuple.mapSecond)
-                        |> Maybe.withDefault identity
-                    )
-                        ( { newModel | isTriggerBuildKeyDown = True }, effects )
+                    if List.isEmpty newModel.jobVars then
+                        (newModel.job
+                            |> Maybe.map (DoTriggerBuild >> (::) >> Tuple.mapSecond)
+                            |> Maybe.withDefault identity
+                        )
+                            ( { newModel | isTriggerBuildKeyDown = True }, effects )
+
+                    else
+                        ( { newModel
+                            | isTriggerBuildKeyDown = True
+                            , triggerFormVisible = True
+                            , triggerFormValues = Dict.empty
+                            , triggerFormError = Nothing
+                          }
+                        , effects
+                        )
 
                 else
                     ( newModel, effects )

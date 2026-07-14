@@ -164,7 +164,9 @@ handleCallback : Callback -> Model -> ( Model, List Effect )
 handleCallback callback model =
     case callback of
         BuildTriggered (Err err) ->
-            redirectToLoginIfNecessary err ( model, [] )
+            -- the subpage shows non-auth failures in the trigger vars form
+            subpageHandleCallback callback ( model, [] )
+                |> redirectToLoginIfNecessary err
 
         BuildAborted (Err err) ->
             redirectToLoginIfNecessary err ( model, [] )

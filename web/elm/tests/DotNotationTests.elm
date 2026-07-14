@@ -4,7 +4,6 @@ import Concourse exposing (JsonValue(..))
 import Dict
 import DotNotation exposing (expand, flatten, parse, serialize)
 import Expect
-import Json.Encode
 import Test exposing (Test, describe, test)
 
 
@@ -144,7 +143,7 @@ parseTest =
                             , fields = []
                             , value =
                                 JsonObject
-                                    [ ( "foo", JsonRaw (Json.Encode.bool True) )
+                                    [ ( "foo", JsonBoolean True )
                                     , ( "hello", JsonNumber 1 )
                                     ]
                             }

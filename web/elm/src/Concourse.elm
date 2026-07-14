@@ -34,6 +34,8 @@ module Concourse exposing
     , JobInput
     , JobName
     , JobOutput
+    , JobVar
+    , JobVarType(..)
     , JsonValue(..)
     , Metadata
     , MetadataField
@@ -65,6 +67,7 @@ module Concourse exposing
     , decodeInstanceGroupId
     , decodeInstanceVars
     , decodeJob
+    , decodeJobVars
     , decodeJsonValue
     , decodeMetadata
     , decodePipeline
@@ -80,6 +83,7 @@ module Concourse exposing
     , encodeInstanceGroupId
     , encodeInstanceVars
     , encodeJob
+    , encodeJobVars
     , encodeJsonValue
     , encodePipeline
     , encodeResource
@@ -89,6 +93,7 @@ module Concourse exposing
     , hyphenNotation
     , isInInstanceGroup
     , isInstanceGroup
+    , jobVarOverridesFromInputs
     , mapBuildPlan
     , pipelineId
     , resourceId
@@ -210,6 +215,7 @@ type alias Build =
     , status : BuildStatus
     , duration : BuildDuration
     , comment : String
+    , triggerVars : Dict String JsonValue
     , reapTime : Maybe Time.Posix
     , createdBy : BuildCreatedBy
     }
@@ -234,6 +240,14 @@ encodeBuild build =
          , optionalField "start_time" (secondsFromDate >> Json.Encode.int) build.duration.startedAt
          , optionalField "end_time" (secondsFromDate >> Json.Encode.int) build.duration.finishedAt
          , ( "comment", build.comment |> Json.Encode.string ) |> Just
+         , optionalField "trigger_vars"
+            encodeInstanceVars
+            (if Dict.isEmpty build.triggerVars then
+                Nothing
+
+             else
+                Just build.triggerVars
+            )
          , optionalField "reap_time" (secondsFromDate >> Json.Encode.int) build.reapTime
          , optionalField "created_by" Json.Encode.string build.createdBy
          ]
@@ -273,6 +287,7 @@ decodeBuild =
                 |> andMap (Json.Decode.maybe (Json.Decode.field "end_time" (Json.Decode.map dateFromSeconds Json.Decode.int)))
             )
         |> andMap (defaultTo "" <| Json.Decode.field "comment" <| Json.Decode.string)
+        |> andMap (defaultTo Dict.empty <| Json.Decode.field "trigger_vars" <| decodeInstanceVars)
         |> andMap (Json.Decode.maybe (Json.Decode.field "reap_time" (Json.Decode.map dateFromSeconds Json.Decode.int)))
         |> andMap (Json.Decode.maybe (Json.Decode.field "created_by" Json.Decode.string))
 
@@ -520,6 +535,7 @@ type alias HookedPlan =
 type JsonValue
     = JsonString String
     | JsonNumber Float
+    | JsonBoolean Bool
     | JsonObject (List ( String, JsonValue ))
     | JsonRaw Json.Decode.Value
 
@@ -539,6 +555,7 @@ decodeSimpleJsonValue =
     Json.Decode.oneOf
         [ Json.Decode.string |> Json.Decode.map JsonString
         , Json.Decode.float |> Json.Decode.map JsonNumber
+        , Json.Decode.bool |> Json.Decode.map JsonBoolean
         , Json.Decode.value |> Json.Decode.map JsonRaw
         ]
 
@@ -551,6 +568,9 @@ encodeJsonValue v =
 
         JsonNumber f ->
             Json.Encode.float f
+
+        JsonBoolean b ->
+            Json.Encode.bool b
 
         JsonObject kvs ->
             encodeJsonObject kvs
@@ -574,6 +594,9 @@ flattenJson key val =
 
         JsonNumber n ->
             [ ( key, String.fromFloat n ) ]
+
+        JsonBoolean b ->
+            [ ( key, boolToString b ) ]
 
         JsonRaw v ->
             [ ( key, Json.Encode.encode 0 v ) ]
@@ -996,7 +1019,25 @@ type alias Job =
     , inputs : List JobInput
     , outputs : List JobOutput
     , groups : List String
+    , vars : List JobVar
     }
+
+
+type alias JobVar =
+    { name : String
+    , type_ : JobVarType
+    , options : List String
+    , default : Maybe JsonValue
+    , description : Maybe String
+    , required : Bool
+    }
+
+
+type JobVarType
+    = JobVarString
+    | JobVarNumber
+    | JobVarBoolean
+    | JobVarEnum
 
 
 type alias JobInput =
@@ -1030,6 +1071,7 @@ encodeJob job =
         , ( "inputs", job.inputs |> Json.Encode.list encodeJobInput )
         , ( "outputs", job.outputs |> Json.Encode.list encodeJobOutput )
         , ( "groups", job.groups |> Json.Encode.list Json.Encode.string )
+        , ( "vars", job.vars |> encodeJobVars )
         ]
 
 
@@ -1058,6 +1100,166 @@ decodeJob =
         |> andMap (defaultTo [] <| Json.Decode.field "inputs" <| Json.Decode.list decodeJobInput)
         |> andMap (defaultTo [] <| Json.Decode.field "outputs" <| Json.Decode.list decodeJobOutput)
         |> andMap (defaultTo [] <| Json.Decode.field "groups" <| Json.Decode.list Json.Decode.string)
+        |> andMap (defaultTo [] <| Json.Decode.field "vars" decodeJobVars)
+
+
+encodeJobVars : List JobVar -> Json.Encode.Value
+encodeJobVars =
+    List.map
+        (\var ->
+            ( var.name
+            , Json.Encode.object <|
+                List.filterMap identity
+                    [ if var.type_ /= JobVarString then
+                        Just ( "type", encodeJobVarType var.type_ )
+
+                      else
+                        Nothing
+                    , if var.type_ == JobVarEnum then
+                        Just ( "options", Json.Encode.list Json.Encode.string var.options )
+
+                      else
+                        Nothing
+                    , var.default
+                        |> Maybe.map (\d -> ( "default", encodeJsonValue d ))
+                    , var.description
+                        |> Maybe.map (\d -> ( "description", Json.Encode.string d ))
+                    , if var.required then
+                        Just ( "required", Json.Encode.bool True )
+
+                      else
+                        Nothing
+                    ]
+            )
+        )
+        >> Json.Encode.object
+
+
+decodeJobVars : Json.Decode.Decoder (List JobVar)
+decodeJobVars =
+    Json.Decode.keyValuePairs decodeJobVarConfig
+        |> Json.Decode.map
+            (List.map (\( name, toVar ) -> toVar name)
+                >> List.sortBy .name
+            )
+
+
+decodeJobVarConfig : Json.Decode.Decoder (String -> JobVar)
+decodeJobVarConfig =
+    Json.Decode.succeed
+        (\varType options default description required name ->
+            { name = name
+            , type_ = varType
+            , options = options
+            , default = default
+            , description = description
+            , required = required
+            }
+        )
+        |> andMap (defaultTo JobVarString <| Json.Decode.field "type" decodeJobVarType)
+        |> andMap (defaultTo [] <| Json.Decode.field "options" (Json.Decode.list Json.Decode.string))
+        |> andMap (Json.Decode.maybe (Json.Decode.field "default" decodeJsonValue))
+        |> andMap (Json.Decode.maybe (Json.Decode.field "description" Json.Decode.string))
+        |> andMap (defaultTo False <| Json.Decode.field "required" Json.Decode.bool)
+
+
+encodeJobVarType : JobVarType -> Json.Encode.Value
+encodeJobVarType varType =
+    Json.Encode.string <|
+        case varType of
+            JobVarString ->
+                "string"
+
+            JobVarNumber ->
+                "number"
+
+            JobVarBoolean ->
+                "boolean"
+
+            JobVarEnum ->
+                "enum"
+
+
+decodeJobVarType : Json.Decode.Decoder JobVarType
+decodeJobVarType =
+    Json.Decode.string
+        |> Json.Decode.andThen
+            (\rawType ->
+                case rawType of
+                    "string" ->
+                        Json.Decode.succeed JobVarString
+
+                    "number" ->
+                        Json.Decode.succeed JobVarNumber
+
+                    "boolean" ->
+                        Json.Decode.succeed JobVarBoolean
+
+                    "enum" ->
+                        Json.Decode.succeed JobVarEnum
+
+                    _ ->
+                        Json.Decode.fail ("unsupported job var type: " ++ rawType)
+            )
+
+
+jobVarOverridesFromInputs : List JobVar -> Dict String String -> Dict String JsonValue
+jobVarOverridesFromInputs vars values =
+    let
+        varsByName =
+            vars
+                |> List.map (\var -> ( var.name, var ))
+                |> Dict.fromList
+    in
+    Dict.foldl
+        (\name rawValue overrides ->
+            case Dict.get name varsByName of
+                -- for typed controls an empty value means "unset" (a cleared
+                -- number field, a select left on its placeholder): omit it so
+                -- the declared default or required-var validation applies
+                -- server-side. for string vars "" is a legitimate value to
+                -- submit; untouched fields never appear in the edited values,
+                -- so defaults still apply when the field was left alone
+                Just var ->
+                    if rawValue == "" && var.type_ /= JobVarString then
+                        overrides
+
+                    else
+                        Dict.insert name (jobVarValueFromInput var rawValue) overrides
+
+                Nothing ->
+                    overrides
+        )
+        Dict.empty
+        values
+
+
+jobVarValueFromInput : JobVar -> String -> JsonValue
+jobVarValueFromInput var rawValue =
+    case var.type_ of
+        JobVarString ->
+            JsonString rawValue
+
+        JobVarNumber ->
+            rawValue
+                |> String.toFloat
+                |> Maybe.map JsonNumber
+                |> Maybe.withDefault (JsonString rawValue)
+
+        JobVarBoolean ->
+            JsonBoolean (rawValue == "true")
+
+        JobVarEnum ->
+            JsonString rawValue
+
+
+boolToString : Bool -> String
+boolToString value =
+    if value then
+        "true"
+
+    else
+        "false"
 
 
 encodeJobInput : JobInput -> Json.Encode.Value

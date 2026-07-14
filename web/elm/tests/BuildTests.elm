@@ -15,7 +15,7 @@ import Common
         , hoverOver
         , isColorWithStripes
         )
-import Concourse exposing (BuildPrepStatus(..))
+import Concourse exposing (BuildPrepStatus(..), JsonValue(..))
 import Concourse.BuildStatus exposing (BuildStatus(..))
 import Concourse.Pagination exposing (Direction(..))
 import DashboardTests exposing (iconSelector)
@@ -126,6 +126,62 @@ all =
                                 |> Data.withShortPipelineId
                                 |> Data.withName "j"
                                 |> Data.withDisableReruns True
+                            )
+
+            fetchJobDetailsWithVars :
+                Application.Model
+                -> ( Application.Model, List Effects.Effect )
+            fetchJobDetailsWithVars =
+                Application.handleCallback <|
+                    Callback.BuildJobDetailsFetched <|
+                        Ok
+                            (Data.job 0
+                                |> Data.withShortPipelineId
+                                |> Data.withName "j"
+                                |> Data.withJobVars
+                                    [ { name = "branch"
+                                      , type_ = Concourse.JobVarString
+                                      , options = []
+                                      , default = Just (JsonString "main")
+                                      , description = Just "branch to build"
+                                      , required = False
+                                      }
+                                    , { name = "count"
+                                      , type_ = Concourse.JobVarNumber
+                                      , options = []
+                                      , default = Just (JsonNumber 1)
+                                      , description = Nothing
+                                      , required = False
+                                      }
+                                    , { name = "confirm_release"
+                                      , type_ = Concourse.JobVarBoolean
+                                      , options = []
+                                      , default = Nothing
+                                      , description = Nothing
+                                      , required = True
+                                      }
+                                    , { name = "dry_run"
+                                      , type_ = Concourse.JobVarBoolean
+                                      , options = []
+                                      , default = Just (JsonBoolean False)
+                                      , description = Just "skip cloning"
+                                      , required = False
+                                      }
+                                    , { name = "deploy_env"
+                                      , type_ = Concourse.JobVarEnum
+                                      , options = [ "dev", "prod" ]
+                                      , default = Just (JsonString "dev")
+                                      , description = Nothing
+                                      , required = False
+                                      }
+                                    , { name = "environment"
+                                      , type_ = Concourse.JobVarString
+                                      , options = []
+                                      , default = Nothing
+                                      , description = Nothing
+                                      , required = True
+                                      }
+                                    ]
                             )
 
             fetchHistory :
@@ -662,6 +718,7 @@ all =
                                         { startedAt = Nothing
                                         , finishedAt = Nothing
                                         }
+                                    , triggerVars = Dict.empty
                                     , reapTime = Nothing
                                     , createdBy = Nothing
                                     , comment = ""
@@ -1152,6 +1209,502 @@ all =
                         )
                     |> Tuple.second
                     |> Expect.equal [ Effects.DoTriggerBuild Data.shortJobId ]
+        , describe "trigger build vars form" <|
+            let
+                givenBuildAndJobWithVars : () -> Application.Model
+                givenBuildAndJobWithVars _ =
+                    Common.init "/teams/t/pipelines/p/jobs/j/builds/1"
+                        |> fetchBuild BuildStatusSucceeded
+                        |> Tuple.first
+                        |> fetchJobDetailsWithVars
+                        |> Tuple.first
+
+                clickTrigger :
+                    Application.Model
+                    -> ( Application.Model, List Effects.Effect )
+                clickTrigger =
+                    Application.update
+                        (Msgs.Update <| Message.Message.Click TriggerBuildButton)
+            in
+            [ test "clicking trigger button triggers build immediately when job has no vars" <|
+                \_ ->
+                    Common.init "/teams/t/pipelines/p/jobs/j/builds/1"
+                        |> fetchBuild BuildStatusSucceeded
+                        |> Tuple.first
+                        |> fetchJobDetails
+                        |> Tuple.first
+                        |> clickTrigger
+                        |> Tuple.second
+                        |> Common.contains (Effects.DoTriggerBuild Data.shortJobId)
+            , test "no form is shown when job has no vars" <|
+                \_ ->
+                    Common.init "/teams/t/pipelines/p/jobs/j/builds/1"
+                        |> fetchBuild BuildStatusSucceeded
+                        |> Tuple.first
+                        |> fetchJobDetails
+                        |> Tuple.first
+                        |> clickTrigger
+                        |> Tuple.first
+                        |> Common.queryView
+                        |> Query.hasNot [ id "trigger-build-form" ]
+            , test "clicking trigger button shows the form when job has vars" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.has [ id "trigger-build-form" ]
+            , test "form renders between the fixed header and the build body" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.find [ class "with-fixed-header" ]
+                    >> Query.children []
+                    >> Query.index 1
+                    >> Query.has [ id "trigger-build-form" ]
+            , test "clicking trigger button does not trigger a build when job has vars" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.second
+                    >> Common.notContains (Effects.DoTriggerBuild Data.shortJobId)
+            , test "form is hidden before the trigger button is clicked" <|
+                givenBuildAndJobWithVars
+                    >> Common.queryView
+                    >> Query.hasNot [ id "trigger-build-form" ]
+            , test "form inputs are pre-filled with defaults rendered as text" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.find [ id "trigger-build-form" ]
+                    >> Expect.all
+                        [ Query.find [ id "trigger-build-form-var-branch" ]
+                            >> Query.has [ attribute <| Attr.value "main" ]
+                        , Query.find [ id "trigger-build-form-var-count" ]
+                            >> Query.has [ attribute <| Attr.value "1" ]
+                        , Query.find [ id "trigger-build-form-var-confirm_release" ]
+                            >> Query.children []
+                            >> Query.index 0
+                            >> Query.has [ attribute <| Attr.selected True, text "-- select --" ]
+                        , Query.find [ id "trigger-build-form-var-deploy_env" ]
+                            >> Query.children []
+                            >> Query.index 0
+                            >> Query.has [ attribute <| Attr.selected True, text "dev" ]
+                        ]
+            , test "opening the form keeps defaults even when the selected build has overrides" <|
+                \_ ->
+                    Common.init "/teams/t/pipelines/p/jobs/j/builds/1"
+                        |> Application.handleCallback
+                            (Callback.BuildFetched <|
+                                Ok
+                                    (Data.jobBuild BuildStatusSucceeded
+                                        |> Data.withTriggerVars
+                                            (Dict.fromList
+                                                [ ( "branch", JsonString "release/1.2" )
+                                                , ( "count", JsonNumber 5 )
+                                                , ( "confirm_release", JsonBoolean False )
+                                                , ( "dry_run", JsonBoolean True )
+                                                , ( "deploy_env", JsonString "prod" )
+                                                ]
+                                            )
+                                    )
+                            )
+                        |> Tuple.first
+                        |> fetchJobDetailsWithVars
+                        |> Tuple.first
+                        |> clickTrigger
+                        |> Tuple.first
+                        |> Common.queryView
+                        |> Query.find [ id "trigger-build-form" ]
+                        |> Expect.all
+                            [ Query.find [ id "trigger-build-form-var-branch" ]
+                                >> Query.has [ attribute <| Attr.value "main" ]
+                            , Query.find [ id "trigger-build-form-var-count" ]
+                                >> Query.has [ attribute <| Attr.value "1" ]
+                            , Query.find [ id "trigger-build-form-var-confirm_release" ]
+                                >> Query.children []
+                                >> Query.index 0
+                                >> Query.has [ attribute <| Attr.selected True, text "-- select --" ]
+                            , Query.find [ id "trigger-build-form-var-deploy_env" ]
+                                >> Query.children []
+                                >> Query.index 0
+                                >> Query.has [ attribute <| Attr.selected True, text "dev" ]
+                            , Query.find [ id <| toHtmlID TriggerBuildFormUseSelectedBuildButton ]
+                                >> Query.has [ text "use build #1 overrides" ]
+                            ]
+            , test "clicking use selected build overrides loads the selected build values" <|
+                \_ ->
+                    Common.init "/teams/t/pipelines/p/jobs/j/builds/1"
+                        |> Application.handleCallback
+                            (Callback.BuildFetched <|
+                                Ok
+                                    (Data.jobBuild BuildStatusSucceeded
+                                        |> Data.withTriggerVars
+                                            (Dict.fromList
+                                                [ ( "branch", JsonString "release/1.2" )
+                                                , ( "count", JsonNumber 5 )
+                                                , ( "confirm_release", JsonBoolean False )
+                                                , ( "dry_run", JsonBoolean True )
+                                                , ( "deploy_env", JsonString "prod" )
+                                                ]
+                                            )
+                                    )
+                            )
+                        |> Tuple.first
+                        |> fetchJobDetailsWithVars
+                        |> Tuple.first
+                        |> clickTrigger
+                        |> Tuple.first
+                        |> Application.update (Msgs.Update <| Message.Message.Click TriggerBuildFormUseSelectedBuildButton)
+                        |> Tuple.first
+                        |> Common.queryView
+                        |> Query.find [ id "trigger-build-form" ]
+                        |> Expect.all
+                            [ Query.find [ id "trigger-build-form-var-branch" ]
+                                >> Query.has [ attribute <| Attr.value "release/1.2" ]
+                            , Query.find [ id "trigger-build-form-var-count" ]
+                                >> Query.has [ attribute <| Attr.value "5" ]
+                            , Query.find [ id "trigger-build-form-var-dry_run" ]
+                                >> Query.has [ attribute <| Attr.checked True ]
+                            , Query.find [ id "trigger-build-form-var-confirm_release" ]
+                                >> Query.children []
+                                >> Query.index 1
+                                >> Query.has [ attribute <| Attr.selected True, text "false" ]
+                            , Query.find [ id "trigger-build-form-var-deploy_env" ]
+                                >> Query.children []
+                                >> Query.index 1
+                                >> Query.has [ attribute <| Attr.selected True, text "prod" ]
+                            ]
+            , test "use selected build overrides follows the currently selected build while the form is open" <|
+                \_ ->
+                    Common.init "/teams/t/pipelines/p/jobs/j/builds/1"
+                        |> Application.handleCallback
+                            (Callback.BuildFetched <|
+                                Ok
+                                    (Data.jobBuild BuildStatusSucceeded
+                                        |> Data.withTriggerVars
+                                            (Dict.fromList
+                                                [ ( "branch", JsonString "release/1.2" ) ]
+                                            )
+                                    )
+                            )
+                        |> Tuple.first
+                        |> fetchJobDetailsWithVars
+                        |> Tuple.first
+                        |> clickTrigger
+                        |> Tuple.first
+                        |> Application.handleCallback
+                            (Callback.BuildFetched <|
+                                Ok
+                                    (Data.jobBuild BuildStatusSucceeded
+                                        |> Data.withName "2"
+                                        |> Data.withTriggerVars
+                                            (Dict.fromList
+                                                [ ( "branch", JsonString "release/2.0" ) ]
+                                            )
+                                    )
+                            )
+                        |> Tuple.first
+                        |> Application.update (Msgs.Update <| Message.Message.Click TriggerBuildFormUseSelectedBuildButton)
+                        |> Tuple.first
+                        |> Common.queryView
+                        |> Query.find [ id "trigger-build-form" ]
+                        |> Expect.all
+                            [ Query.find [ id <| toHtmlID TriggerBuildFormUseSelectedBuildButton ]
+                                >> Query.has [ text "use build #2 overrides" ]
+                            , Query.find [ id "trigger-build-form-var-branch" ]
+                                >> Query.has [ attribute <| Attr.value "release/2.0" ]
+                            ]
+            , test "reset to defaults clears loaded overrides" <|
+                \_ ->
+                    Common.init "/teams/t/pipelines/p/jobs/j/builds/1"
+                        |> Application.handleCallback
+                            (Callback.BuildFetched <|
+                                Ok
+                                    (Data.jobBuild BuildStatusSucceeded
+                                        |> Data.withTriggerVars
+                                            (Dict.fromList
+                                                [ ( "branch", JsonString "release/1.2" ) ]
+                                            )
+                                    )
+                            )
+                        |> Tuple.first
+                        |> fetchJobDetailsWithVars
+                        |> Tuple.first
+                        |> clickTrigger
+                        |> Tuple.first
+                        |> Application.update (Msgs.Update <| Message.Message.Click TriggerBuildFormUseSelectedBuildButton)
+                        |> Tuple.first
+                        |> Application.update (Msgs.Update <| Message.Message.Click TriggerBuildFormResetButton)
+                        |> Tuple.first
+                        |> Common.queryView
+                        |> Query.find [ id "trigger-build-form" ]
+                        |> Expect.all
+                            [ Query.find [ id "trigger-build-form-var-branch" ]
+                                >> Query.has [ attribute <| Attr.value "main" ]
+                            , Query.hasNot [ id <| toHtmlID TriggerBuildFormResetButton ]
+                            ]
+            , test "form shows var names, descriptions and required markers" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.find [ id "trigger-build-form" ]
+                    >> Expect.all
+                        [ Query.has [ text "branch" ]
+                        , Query.has [ text "branch to build" ]
+                        , Query.has [ text "confirm_release (required)" ]
+                        , Query.has [ text "skip cloning" ]
+                        , Query.has [ text "environment (required)" ]
+                        , Query.has [ text "Trigger values are stored with build metadata. Do not enter secrets." ]
+                        ]
+            , test "typing in a var field sends TriggerBuildVarChanged" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.find [ id "trigger-build-form-var-branch" ]
+                    >> Event.simulate (Event.input "feature")
+                    >> Event.expect
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "branch" "feature"
+                        )
+            , test "toggling a boolean field sends TriggerBuildVarChanged" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.find [ id "trigger-build-form-var-dry_run" ]
+                    >> Event.simulate (Event.check True)
+                    >> Event.expect
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "dry_run" "true"
+                        )
+            , test "selecting false for a required boolean sends TriggerBuildVarChanged" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.find [ id "trigger-build-form-var-confirm_release" ]
+                    >> Event.simulate (Event.input "false")
+                    >> Event.expect
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "confirm_release" "false"
+                        )
+            , test "submitting the form triggers a build with only the edited vars" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "branch" "feature"
+                        )
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "confirm_release" "false"
+                        )
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.Click TriggerBuildFormSubmitButton
+                        )
+                    >> Tuple.second
+                    >> Common.contains
+                        (Effects.DoTriggerBuildWithVars Data.shortJobId
+                            (Dict.fromList
+                                [ ( "branch", JsonString "feature" )
+                                , ( "confirm_release", JsonBoolean False )
+                                ]
+                            )
+                        )
+            , test "submitting typed fields preserves their types" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "count" "3"
+                        )
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "dry_run" "true"
+                        )
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "confirm_release" "false"
+                        )
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "deploy_env" "prod"
+                        )
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.Click TriggerBuildFormSubmitButton
+                        )
+                    >> Tuple.second
+                    >> Common.contains
+                        (Effects.DoTriggerBuildWithVars Data.shortJobId
+                            (Dict.fromList
+                                [ ( "count", JsonNumber 3 )
+                                , ( "confirm_release", JsonBoolean False )
+                                , ( "dry_run", JsonBoolean True )
+                                , ( "deploy_env", JsonString "prod" )
+                                ]
+                            )
+                        )
+            , test "submitting the form keeps it open until the trigger succeeds" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.Click TriggerBuildFormSubmitButton
+                        )
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.has [ id "trigger-build-form" ]
+            , test "the form hides once the trigger succeeds" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.Click TriggerBuildFormSubmitButton
+                        )
+                    >> Tuple.first
+                    >> Application.handleCallback
+                        (Callback.BuildTriggered <|
+                            Ok
+                                (Data.jobBuild BuildStatusPending
+                                    |> Data.withId 2
+                                    |> Data.withName "2"
+                                    |> Data.withJob (Just Data.shortJobId)
+                                )
+                        )
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.hasNot [ id "trigger-build-form" ]
+            , test "a rejected trigger shows the server's error in the form" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.Click TriggerBuildFormSubmitButton
+                        )
+                    >> Tuple.first
+                    >> Application.handleCallback
+                        (Callback.BuildTriggered Data.httpBadRequest)
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.find [ id "trigger-build-form-error" ]
+                    >> Query.has
+                        [ text "failed to trigger: undeclared var(s): nope" ]
+            , test "cleared typed fields are omitted from the submitted vars" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "count" ""
+                        )
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.Click TriggerBuildFormSubmitButton
+                        )
+                    >> Tuple.second
+                    >> Common.contains
+                        (Effects.DoTriggerBuildWithVars Data.shortJobId Dict.empty)
+            , test "a string var cleared to empty submits an empty string" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "branch" ""
+                        )
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.Click TriggerBuildFormSubmitButton
+                        )
+                    >> Tuple.second
+                    >> Common.contains
+                        (Effects.DoTriggerBuildWithVars Data.shortJobId
+                            (Dict.fromList [ ( "branch", JsonString "" ) ])
+                        )
+            , test "clicking cancel hides the form" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.Click TriggerBuildFormCancelButton
+                        )
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.hasNot [ id "trigger-build-form" ]
+            , test "clicking the trigger button again hides the form" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.hasNot [ id "trigger-build-form" ]
+            , test "edited values are cleared when the form is cancelled" <|
+                givenBuildAndJobWithVars
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.TriggerBuildVarChanged "branch" "feature"
+                        )
+                    >> Tuple.first
+                    >> Application.update
+                        (Msgs.Update <|
+                            Message.Message.Click TriggerBuildFormCancelButton
+                        )
+                    >> Tuple.first
+                    >> clickTrigger
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.find [ id "trigger-build-form-var-branch" ]
+                    >> Query.has [ attribute <| Attr.value "main" ]
+            , test "keyboard shortcut opens the form when job has vars" <|
+                givenBuildAndJobWithVars
+                    >> Application.update
+                        (Msgs.DeliveryReceived <|
+                            KeyDown <|
+                                { ctrlKey = False
+                                , shiftKey = True
+                                , metaKey = False
+                                , code = Keyboard.T
+                                }
+                        )
+                    >> Tuple.first
+                    >> Common.queryView
+                    >> Query.has [ id "trigger-build-form" ]
+            , test "keyboard shortcut does not trigger immediately when job has vars" <|
+                givenBuildAndJobWithVars
+                    >> Application.update
+                        (Msgs.DeliveryReceived <|
+                            KeyDown <|
+                                { ctrlKey = False
+                                , shiftKey = True
+                                , metaKey = False
+                                , code = Keyboard.T
+                                }
+                        )
+                    >> Tuple.second
+                    >> Common.notContains (Effects.DoTriggerBuild Data.shortJobId)
+            ]
         , test "pressing 'R' reruns build" <|
             \_ ->
                 Common.init "/teams/t/pipelines/p/jobs/j/builds/1"
@@ -2319,7 +2872,6 @@ all =
                         >> Tuple.first
                         >> expectTooltip TriggerBuildButton "manual triggering disabled in job config"
                 ]
-
             , describe "when history and details fetched with reruns disabled" <|
                 let
                     givenHistoryAndDetailsFetched =

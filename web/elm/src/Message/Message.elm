@@ -45,6 +45,8 @@ type Message
       -- Download Fly Page
     | PlatformSelected String
     | GetHostname
+      -- Job
+    | TriggerBuildVarChanged String String
       -- common
     | Hover (Maybe DomID)
     | Click DomID
@@ -60,6 +62,11 @@ type DomID
     | BuildComment
     | ToggleBuildCommentButton
     | TriggerBuildButton
+    | TriggerBuildFormVarField String
+    | TriggerBuildFormUseSelectedBuildButton
+    | TriggerBuildFormResetButton
+    | TriggerBuildFormSubmitButton
+    | TriggerBuildFormCancelButton
     | AbortBuildButton
     | RerunBuildButton
     | JobName

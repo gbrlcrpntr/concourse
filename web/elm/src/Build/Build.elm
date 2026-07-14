@@ -25,6 +25,7 @@ import Build.Shortcuts as Shortcuts
 import Build.StepTree.Models as STModels
 import Build.StepTree.StepTree as StepTree
 import Build.Styles as Styles
+import Colors
 import Concourse
 import Concourse.BuildStatus exposing (BuildStatus(..))
 import DateFormat
@@ -43,8 +44,10 @@ import Html.Attributes
         , tabindex
         , title
         )
+import Html.Events exposing (onClick)
 import Html.Lazy
 import Http
+import Json.Encode
 import List.Extra
 import Login.Login as Login
 import Maybe.Extra
@@ -68,6 +71,7 @@ import Views.NotAuthorized as NotAuthorized
 import Views.Spinner as Spinner
 import Views.Styles
 import Views.TopBar as TopBar
+import Views.TriggerVarsForm as TriggerVarsForm
 
 
 bodyId : String
@@ -127,6 +131,11 @@ init flags =
           , notFound = False
           , reapTime = Nothing
           , createdBy = Nothing
+          , jobVars = []
+          , selectedBuildTriggerVars = Dict.empty
+          , triggerFormVisible = False
+          , triggerFormValues = Dict.empty
+          , triggerFormError = Nothing
           }
         , [ GetCurrentTime
           , GetCurrentTimeZone
@@ -299,16 +308,31 @@ handleCallback action ( model, effects ) =
                     ( model, effects )
 
         BuildJobDetailsFetched (Ok job) ->
-                        ( { model
-                                | disableManualTrigger = job.disableManualTrigger
-                                , disableReruns = job.disableReruns
-                            }
+            ( { model
+                | disableManualTrigger = job.disableManualTrigger
+                , disableReruns = job.disableReruns
+                , jobVars = job.vars
+              }
             , effects
             )
 
         BuildJobDetailsFetched (Err _) ->
             -- https://github.com/concourse/concourse/issues/3201
             ( model, effects )
+
+        BuildTriggered (Ok _) ->
+            ( { model
+                | triggerFormVisible = False
+                , triggerFormValues = Dict.empty
+                , triggerFormError = Nothing
+              }
+            , effects
+            )
+
+        BuildTriggered (Err err) ->
+            ( { model | triggerFormError = Just (TriggerVarsForm.errorMessage err) }
+            , effects
+            )
 
         _ ->
             ( model, effects )
@@ -437,11 +461,65 @@ update msg ( model, effects ) =
             )
 
         Click TriggerBuildButton ->
-            (model.job
-                |> Maybe.map (DoTriggerBuild >> (::) >> Tuple.mapSecond)
-                |> Maybe.withDefault identity
+            if List.isEmpty model.jobVars then
+                (model.job
+                    |> Maybe.map (DoTriggerBuild >> (::) >> Tuple.mapSecond)
+                    |> Maybe.withDefault identity
+                )
+                    ( model, effects )
+
+            else
+                ( { model
+                    | triggerFormVisible = not model.triggerFormVisible
+                    , triggerFormValues = Dict.empty
+                    , triggerFormError = Nothing
+                  }
+                , effects
+                )
+
+        Click TriggerBuildFormUseSelectedBuildButton ->
+            ( { model
+                | triggerFormValues =
+                    triggerFormValuesFromBuild model.jobVars model.selectedBuildTriggerVars
+              }
+            , effects
             )
-                ( model, effects )
+
+        Click TriggerBuildFormResetButton ->
+            ( { model | triggerFormValues = Dict.empty }, effects )
+
+        TriggerBuildVarChanged name val ->
+            ( { model
+                | triggerFormValues =
+                    Dict.insert name val model.triggerFormValues
+              }
+            , effects
+            )
+
+        Click TriggerBuildFormSubmitButton ->
+            -- the form stays open (with values intact) until the server
+            -- accepts the trigger, so a rejection can be shown in place
+            ( { model | triggerFormError = Nothing }
+            , effects
+                ++ (model.job
+                        |> Maybe.map
+                            (\job ->
+                                [ DoTriggerBuildWithVars job
+                                    (Concourse.jobVarOverridesFromInputs model.jobVars model.triggerFormValues)
+                                ]
+                            )
+                        |> Maybe.withDefault []
+                   )
+            )
+
+        Click TriggerBuildFormCancelButton ->
+            ( { model
+                | triggerFormVisible = False
+                , triggerFormValues = Dict.empty
+                , triggerFormError = Nothing
+              }
+            , effects
+            )
 
         Click AbortBuildButton ->
             ( model, DoAbortBuild model.id :: effects )
@@ -579,6 +657,7 @@ handleBuildFetched build ( model, effects ) =
         withBuild =
             { model
                 | reapTime = build.reapTime
+                , selectedBuildTriggerVars = build.triggerVars
                 , output =
                     if model.hasLoadedYet then
                         model.output
@@ -642,6 +721,52 @@ handleBuildFetched build ( model, effects ) =
         ( model, effects )
 
 
+triggerFormValuesFromBuild : List Concourse.JobVar -> Dict String Concourse.JsonValue -> Dict String String
+triggerFormValuesFromBuild vars triggerVars =
+    let
+        varsByName =
+            vars
+                |> List.map (\var -> ( var.name, var ))
+                |> Dict.fromList
+    in
+    Dict.foldl
+        (\name jsonValue values ->
+            case Dict.get name varsByName of
+                Just _ ->
+                    Dict.insert name (triggerFormValueFromJson jsonValue) values
+
+                Nothing ->
+                    values
+        )
+        Dict.empty
+        triggerVars
+
+
+triggerFormValueFromJson : Concourse.JsonValue -> String
+triggerFormValueFromJson jsonValue =
+    case jsonValue of
+        Concourse.JsonString stringValue ->
+            stringValue
+
+        Concourse.JsonNumber numberValue ->
+            String.fromFloat numberValue
+
+        Concourse.JsonBoolean boolValue ->
+            boolToString boolValue
+
+        complexValue ->
+            Json.Encode.encode 0 (Concourse.encodeJsonValue complexValue)
+
+
+boolToString : Bool -> String
+boolToString boolValue =
+    if boolValue then
+        "true"
+
+    else
+        "false"
+
+
 pollUntilStarted : Int -> List Effect
 pollUntilStarted buildId =
     [ FetchBuild 1000 buildId
@@ -692,26 +817,28 @@ view session model =
     in
     Html.div
         (id "page-including-top-bar" :: Views.Styles.pageIncludingTopBar)
-        [ Views.Styles.hideIf session.hideUI (Html.div
-            (id "top-bar-app" :: Views.Styles.topBar False)
-            (SideBar.sideBarIcon session
-                :: breadcrumbs session model
-                ++ [ Login.view session.userState model ]
+        [ Views.Styles.hideIf session.hideUI
+            (Html.div
+                (id "top-bar-app" :: Views.Styles.topBar False)
+                (SideBar.sideBarIcon session
+                    :: breadcrumbs session model
+                    ++ [ Login.view session.userState model ]
+                )
             )
-          )
         , Html.div
             (id "page-below-top-bar" :: Views.Styles.pageBelowTopBar session.hideUI route)
-            [ Views.Styles.hideIf session.hideUI (SideBar.view session
-                (model.job
-                    |> Maybe.map
-                        (\j ->
-                            { pipelineName = j.pipelineName
-                            , pipelineInstanceVars = j.pipelineInstanceVars
-                            , teamName = j.teamName
-                            }
-                        )
+            [ Views.Styles.hideIf session.hideUI
+                (SideBar.view session
+                    (model.job
+                        |> Maybe.map
+                            (\j ->
+                                { pipelineName = j.pipelineName
+                                , pipelineInstanceVars = j.pipelineInstanceVars
+                                , teamName = j.teamName
+                                }
+                            )
+                    )
                 )
-              )
             , viewBuildPage session model
             ]
         ]
@@ -778,11 +905,82 @@ viewBuildPage session model =
             , style "overflow" "hidden"
             ]
             [ Header.view session model
+            , if model.triggerFormVisible then
+                TriggerVarsForm.view
+                    { headerContent = buildTriggerFormHeaderContent model
+                    , vars = model.jobVars
+                    , values = model.triggerFormValues
+                    , error = model.triggerFormError
+                    }
+
+              else
+                Html.text ""
             , body session model
             ]
 
     else
         LoadingIndicator.view
+
+
+buildTriggerFormHeaderContent : Model -> List (Html Message)
+buildTriggerFormHeaderContent model =
+    let
+        actions =
+            List.filterMap identity
+                [ if Dict.isEmpty model.selectedBuildTriggerVars then
+                    Nothing
+
+                  else
+                    Just <|
+                        Html.button
+                            ([ id <| Effects.toHtmlID TriggerBuildFormUseSelectedBuildButton
+                             , onClick <| Click TriggerBuildFormUseSelectedBuildButton
+                             ]
+                                ++ triggerFormSecondaryButton
+                            )
+                            [ Html.text <| "use build #" ++ model.name ++ " overrides" ]
+                , if Dict.isEmpty model.triggerFormValues then
+                    Nothing
+
+                  else
+                    Just <|
+                        Html.button
+                            ([ id <| Effects.toHtmlID TriggerBuildFormResetButton
+                             , onClick <| Click TriggerBuildFormResetButton
+                             ]
+                                ++ triggerFormSecondaryButton
+                            )
+                            [ Html.text "reset to defaults" ]
+                ]
+    in
+    if List.isEmpty actions then
+        []
+
+    else
+        [ Html.div triggerFormActionBar actions ]
+
+
+triggerFormActionBar : List (Html.Attribute Message)
+triggerFormActionBar =
+    [ style "display" "flex"
+    , style "gap" "10px"
+    , style "padding-bottom" "12px"
+    , style "margin-bottom" "16px"
+    , style "border-bottom" ("1px solid " ++ Colors.background)
+    ]
+
+
+triggerFormSecondaryButton : List (Html.Attribute Message)
+triggerFormSecondaryButton =
+    [ style "font-size" "13px"
+    , style "line-height" "1.3"
+    , style "color" Colors.text
+    , style "background" Colors.frame
+    , style "border" ("1px solid " ++ Colors.background)
+    , style "border-radius" "3px"
+    , style "padding" "6px 10px"
+    , style "cursor" "pointer"
+    ]
 
 
 body :

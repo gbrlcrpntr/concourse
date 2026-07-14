@@ -28,6 +28,53 @@ all =
                     |> Concourse.encodeJob
                     |> Json.Decode.decodeValue Concourse.decodeJob
                     |> Expect.equal (Ok job)
+        , test "job with vars encoding/decoding are inverses" <|
+            \_ ->
+                let
+                    job =
+                        Data.job 1
+                            |> Data.withJobVars
+                                [ { name = "branch"
+                                  , type_ = Concourse.JobVarString
+                                  , options = []
+                                  , default = Just (JsonString "main")
+                                  , description = Just "branch to build"
+                                  , required = False
+                                  }
+                                , { name = "count"
+                                  , type_ = Concourse.JobVarNumber
+                                  , options = []
+                                  , default = Just (JsonNumber 3)
+                                  , description = Nothing
+                                  , required = False
+                                  }
+                                , { name = "deploy_env"
+                                  , type_ = Concourse.JobVarEnum
+                                  , options = [ "dev", "prod" ]
+                                  , default = Just (JsonString "dev")
+                                  , description = Nothing
+                                  , required = False
+                                  }
+                                , { name = "dry_run"
+                                  , type_ = Concourse.JobVarBoolean
+                                  , options = []
+                                  , default = Just (JsonBoolean False)
+                                  , description = Nothing
+                                  , required = False
+                                  }
+                                , { name = "environment"
+                                  , type_ = Concourse.JobVarString
+                                  , options = []
+                                  , default = Nothing
+                                  , description = Nothing
+                                  , required = True
+                                  }
+                                ]
+                in
+                job
+                    |> Concourse.encodeJob
+                    |> Json.Decode.decodeValue Concourse.decodeJob
+                    |> Expect.equal (Ok job)
         , test "resource encoding/decoding are inverses" <|
             \_ ->
                 let
@@ -45,6 +92,12 @@ all =
                     build =
                         Data.jobBuild BuildStatus.BuildStatusPending
                             |> Data.withTeamName "t"
+                            |> Data.withTriggerVars
+                                (Dict.fromList
+                                    [ ( "branch", JsonString "main" )
+                                    , ( "dry_run", JsonBoolean False )
+                                    ]
+                                )
                             |> Data.withDuration
                                 { startedAt =
                                     Just <| Time.millisToPosix 1000

@@ -27,7 +27,7 @@ import Concourse.Pagination
         , chevronLeft
         , chevronRight
         )
-import Dict
+import Dict exposing (Dict)
 import EffectTransformer exposing (ET)
 import HoverState
 import Html exposing (Html)
@@ -67,6 +67,7 @@ import Views.Icon as Icon
 import Views.LoadingIndicator as LoadingIndicator
 import Views.Styles
 import Views.TopBar as TopBar
+import Views.TriggerVarsForm as TriggerVarsForm
 
 
 type alias Model =
@@ -77,6 +78,9 @@ type alias Model =
         , buildsWithResources : WebData (Paginated BuildWithResources)
         , currentPage : Page
         , now : Time.Posix
+        , triggerFormVisible : Bool
+        , triggerFormValues : Dict String String
+        , triggerFormError : Maybe String
         }
 
 
@@ -118,6 +122,9 @@ init flags =
             , now = Time.millisToPosix 0
             , currentPage = page
             , isUserMenuExpanded = False
+            , triggerFormVisible = False
+            , triggerFormValues = Dict.empty
+            , triggerFormError = Nothing
             }
     in
     ( model
@@ -164,8 +171,17 @@ getUpdateMessage model =
 handleCallback : Callback -> ET Model
 handleCallback callback ( model, effects ) =
     case callback of
+        BuildTriggered (Err err) ->
+            ( { model | triggerFormError = Just (TriggerVarsForm.errorMessage err) }
+            , effects
+            )
+
         BuildTriggered (Ok build) ->
-            ( model
+            ( { model
+                | triggerFormVisible = False
+                , triggerFormValues = Dict.empty
+                , triggerFormError = Nothing
+              }
             , case build.job of
                 Nothing ->
                     effects
@@ -266,7 +282,53 @@ update : Message -> ET Model
 update action ( model, effects ) =
     case action of
         Click TriggerBuildButton ->
-            ( model, effects ++ [ DoTriggerBuild model.jobIdentifier ] )
+            case model.job |> RemoteData.toMaybe of
+                Just job ->
+                    if List.isEmpty job.vars then
+                        ( model, effects ++ [ DoTriggerBuild model.jobIdentifier ] )
+
+                    else
+                        ( { model
+                            | triggerFormVisible = not model.triggerFormVisible
+                            , triggerFormValues = Dict.empty
+                            , triggerFormError = Nothing
+                          }
+                        , effects
+                        )
+
+                Nothing ->
+                    ( model, effects ++ [ DoTriggerBuild model.jobIdentifier ] )
+
+        TriggerBuildVarChanged name val ->
+            ( { model
+                | triggerFormValues =
+                    Dict.insert name val model.triggerFormValues
+              }
+            , effects
+            )
+
+        Click TriggerBuildFormSubmitButton ->
+            -- the form stays open (with values intact) until the server
+            -- accepts the trigger, so a rejection can be shown in place
+            ( { model | triggerFormError = Nothing }
+            , effects
+                ++ [ DoTriggerBuildWithVars model.jobIdentifier
+                        (model.job
+                            |> RemoteData.toMaybe
+                            |> Maybe.map (\job -> Concourse.jobVarOverridesFromInputs job.vars model.triggerFormValues)
+                            |> Maybe.withDefault Dict.empty
+                        )
+                   ]
+            )
+
+        Click TriggerBuildFormCancelButton ->
+            ( { model
+                | triggerFormVisible = False
+                , triggerFormValues = Dict.empty
+                , triggerFormError = Nothing
+              }
+            , effects
+            )
 
         Click ToggleJobButton ->
             case model.job |> RemoteData.toMaybe of
@@ -425,23 +487,25 @@ view : Session -> Model -> Html Message
 view session model =
     Html.div
         (id "page-including-top-bar" :: Views.Styles.pageIncludingTopBar)
-        [ Views.Styles.hideIf session.hideUI (Html.div
-            (id "top-bar-app" :: Views.Styles.topBar False)
-            (SideBar.sideBarIcon session
-                :: TopBar.breadcrumbs session session.route
-                ++ [ Login.view session.userState model ]
+        [ Views.Styles.hideIf session.hideUI
+            (Html.div
+                (id "top-bar-app" :: Views.Styles.topBar False)
+                (SideBar.sideBarIcon session
+                    :: TopBar.breadcrumbs session session.route
+                    ++ [ Login.view session.userState model ]
+                )
             )
-          )
         , Html.div
             (id "page-below-top-bar" :: Views.Styles.pageBelowTopBar session.hideUI session.route)
-            [ Views.Styles.hideIf session.hideUI (SideBar.view session
-                (Just
-                    { pipelineName = model.jobIdentifier.pipelineName
-                    , pipelineInstanceVars = model.jobIdentifier.pipelineInstanceVars
-                    , teamName = model.jobIdentifier.teamName
-                    }
+            [ Views.Styles.hideIf session.hideUI
+                (SideBar.view session
+                    (Just
+                        { pipelineName = model.jobIdentifier.pipelineName
+                        , pipelineInstanceVars = model.jobIdentifier.pipelineInstanceVars
+                        , teamName = model.jobIdentifier.teamName
+                        }
+                    )
                 )
-              )
             , viewMainJobsSection session model
             ]
         ]
@@ -615,6 +679,16 @@ viewMainJobsSection session model =
                                     )
                                 ]
                         ]
+                    , if model.triggerFormVisible then
+                        TriggerVarsForm.view
+                            { headerContent = []
+                            , vars = job.vars
+                            , values = model.triggerFormValues
+                            , error = model.triggerFormError
+                            }
+
+                      else
+                        Html.text ""
                     , Html.div
                         [ id "pagination-header"
                         , style "display" "flex"
