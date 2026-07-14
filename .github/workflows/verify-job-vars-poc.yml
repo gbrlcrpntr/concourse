@@ -1,0 +1,78 @@
+name: Verify job vars PoC
+
+on:
+  push:
+    branches:
+    - job-vars-poc
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  UPSTREAM_BASE_SHA: 47947da7de2abd9f584c979a445c25edd963b0ea
+  CNI_PLUGINS_VERSION: v1.9.1
+  CNI_PLUGINS_SHA256: b98f74a0f8522f0a83867178729c1aa70f2158f90c45a2ca8fa791db1c76b303
+
+concurrency:
+  group: verify-job-vars-poc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go race and serial DB suites
+    if: github.repository == 'gbrlcrpntr/concourse'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - name: Check out the fork
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Run supported privileged Linux suites
+      run: |
+        docker run --rm --privileged \
+          --env UPSTREAM_BASE_SHA \
+          --env CNI_PLUGINS_VERSION \
+          --env CNI_PLUGINS_SHA256 \
+          --volume /lib/modules:/lib/modules:ro \
+          --volume "$GITHUB_WORKSPACE:/src" \
+          --workdir /src \
+          --entrypoint /bin/bash \
+          concourse/unit \
+          -euo pipefail -c '
+            git config --global --add safe.directory /src
+            export PATH="$(go env GOPATH)/bin:$PATH"
+            mkdir -p /usr/local/concourse/bin
+            gcc -O2 -static -o /usr/local/concourse/bin/init \
+              /src/cmd/init/init.c
+            curl -fsSL \
+              -o /tmp/cni-plugins.tgz \
+              "https://github.com/containernetworking/plugins/releases/download/$CNI_PLUGINS_VERSION/cni-plugins-linux-amd64-$CNI_PLUGINS_VERSION.tgz"
+            echo "$CNI_PLUGINS_SHA256  /tmp/cni-plugins.tgz" | \
+              sha256sum -c
+            tar -xzf /tmp/cni-plugins.tgz \
+              -C /usr/local/concourse/bin
+            modprobe ip6_tables
+            modprobe ip6table_nat
+            go install github.com/onsi/ginkgo/v2/ginkgo
+            git diff --exit-code "$UPSTREAM_BASE_SHA" -- \
+              worker/baggageclaim/volume/driver
+            mkdir /tmp/upstream-base
+            git archive "$UPSTREAM_BASE_SHA" | \
+              tar -x -C /tmp/upstream-base
+            if (
+              cd /tmp/upstream-base
+              ginkgo -r -race -flake-attempts=3 \
+                ./worker/baggageclaim/volume/driver
+            ); then
+              echo "clean upstream overlay-driver suite unexpectedly passed"
+              exit 1
+            else
+              echo "clean upstream reproduces the nested-overlay failure"
+            fi
+            ginkgo -r -p -race -flake-attempts=3 \
+              -skip-package ./integration,testflight,topgun,./worker/baggageclaim/volume/driver
+            ginkgo -r -race -flake-attempts=3 ./atc/db
+          '

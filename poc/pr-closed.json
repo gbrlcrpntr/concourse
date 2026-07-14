@@ -1,0 +1,33 @@
+{
+  "action": "closed",
+  "number": 42,
+  "pull_request": {
+    "number": 42,
+    "state": "closed",
+    "title": "Demo PR for job trigger-time vars",
+    "user": {
+      "login": "octocat"
+    },
+    "head": {
+      "ref": "test",
+      "sha": "b3cbd5bbd7e81436d2eee04537ea2b4c0cad4cdf",
+      "repo": {
+        "full_name": "octocat/Hello-World"
+      }
+    },
+    "base": {
+      "ref": "master",
+      "repo": {
+        "full_name": "octocat/Hello-World"
+      }
+    }
+  },
+  "repository": {
+    "full_name": "octocat/Hello-World",
+    "clone_url": "https://github.com/octocat/Hello-World.git",
+    "default_branch": "master"
+  },
+  "sender": {
+    "login": "octocat"
+  }
+}

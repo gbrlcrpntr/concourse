@@ -1,0 +1,57 @@
+# Demo pipeline for job trigger-time vars.
+#
+#   fly -t dev set-pipeline -p job-vars-demo -c poc/demo-pipeline.yml
+#   fly -t dev unpause-pipeline -p job-vars-demo
+#
+# See poc/README.md for the full demo script.
+---
+jobs:
+- name: build-branch
+  vars:
+    branch:
+      default: master
+      description: branch of Hello-World to clone
+    greeting:
+      default: hello
+    clone_depth:
+      type: number
+      default: 1
+      description: git clone depth
+    dry_run:
+      type: boolean
+      default: false
+      description: print settings without changing behavior
+    deploy_env:
+      type: enum
+      options: [dev, staging, prod]
+      default: dev
+      description: environment label to show in the build log
+  trigger_webhooks:
+  - name: github-pr
+    token: wh-secret
+    filter:
+      action: opened
+    var_mapping:
+      branch: pull_request.head.ref
+  plan:
+  - task: clone-and-report
+    config:
+      platform: linux
+
+      image_resource:
+        type: registry-image
+        source:
+          repository: alpine/git
+
+      run:
+        path: sh
+        args:
+        - -exc
+        - |
+          echo "((.:greeting)) from the job-vars demo"
+          echo "target environment: ((.:deploy_env))"
+          echo "dry run: ((.:dry_run))"
+          echo "clone depth: ((.:clone_depth))"
+          git clone -b '((.:branch))' --depth '((.:clone_depth))' https://github.com/octocat/Hello-World.git repo
+          cd repo
+          echo "cloned branch: $(git rev-parse --abbrev-ref HEAD) @ $(git rev-parse --short HEAD)"
