@@ -55,6 +55,22 @@ type FakeJob struct {
 		result2 bool
 		result3 error
 	}
+	BuildByTriggerIDStub        func(string, string) (db.Build, bool, error)
+	buildByTriggerIDMutex       sync.RWMutex
+	buildByTriggerIDArgsForCall []struct {
+		arg1 string
+		arg2 string
+	}
+	buildByTriggerIDReturns struct {
+		result1 db.Build
+		result2 bool
+		result3 error
+	}
+	buildByTriggerIDReturnsOnCall map[int]struct {
+		result1 db.Build
+		result2 bool
+		result3 error
+	}
 	BuildsStub        func(db.Page) ([]db.BuildForAPI, db.Pagination, error)
 	buildsMutex       sync.RWMutex
 	buildsArgsForCall []struct {
@@ -152,6 +168,23 @@ type FakeJob struct {
 	createBuildWithVarsReturnsOnCall map[int]struct {
 		result1 db.Build
 		result2 error
+	}
+	CreateBuildWithVarsAndTriggerIDStub        func(string, map[string]any, string) (db.Build, bool, error)
+	createBuildWithVarsAndTriggerIDMutex       sync.RWMutex
+	createBuildWithVarsAndTriggerIDArgsForCall []struct {
+		arg1 string
+		arg2 map[string]any
+		arg3 string
+	}
+	createBuildWithVarsAndTriggerIDReturns struct {
+		result1 db.Build
+		result2 bool
+		result3 error
+	}
+	createBuildWithVarsAndTriggerIDReturnsOnCall map[int]struct {
+		result1 db.Build
+		result2 bool
+		result3 error
 	}
 	DisableManualTriggerStub        func() bool
 	disableManualTriggerMutex       sync.RWMutex
@@ -785,6 +818,74 @@ func (fake *FakeJob) BuildReturnsOnCall(i int, result1 db.Build, result2 bool, r
 	}{result1, result2, result3}
 }
 
+func (fake *FakeJob) BuildByTriggerID(arg1 string, arg2 string) (db.Build, bool, error) {
+	fake.buildByTriggerIDMutex.Lock()
+	ret, specificReturn := fake.buildByTriggerIDReturnsOnCall[len(fake.buildByTriggerIDArgsForCall)]
+	fake.buildByTriggerIDArgsForCall = append(fake.buildByTriggerIDArgsForCall, struct {
+		arg1 string
+		arg2 string
+	}{arg1, arg2})
+	stub := fake.BuildByTriggerIDStub
+	fakeReturns := fake.buildByTriggerIDReturns
+	fake.recordInvocation("BuildByTriggerID", []interface{}{arg1, arg2})
+	fake.buildByTriggerIDMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2, ret.result3
+	}
+	return fakeReturns.result1, fakeReturns.result2, fakeReturns.result3
+}
+
+func (fake *FakeJob) BuildByTriggerIDCallCount() int {
+	fake.buildByTriggerIDMutex.RLock()
+	defer fake.buildByTriggerIDMutex.RUnlock()
+	return len(fake.buildByTriggerIDArgsForCall)
+}
+
+func (fake *FakeJob) BuildByTriggerIDCalls(stub func(string, string) (db.Build, bool, error)) {
+	fake.buildByTriggerIDMutex.Lock()
+	defer fake.buildByTriggerIDMutex.Unlock()
+	fake.BuildByTriggerIDStub = stub
+}
+
+func (fake *FakeJob) BuildByTriggerIDArgsForCall(i int) (string, string) {
+	fake.buildByTriggerIDMutex.RLock()
+	defer fake.buildByTriggerIDMutex.RUnlock()
+	argsForCall := fake.buildByTriggerIDArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeJob) BuildByTriggerIDReturns(result1 db.Build, result2 bool, result3 error) {
+	fake.buildByTriggerIDMutex.Lock()
+	defer fake.buildByTriggerIDMutex.Unlock()
+	fake.BuildByTriggerIDStub = nil
+	fake.buildByTriggerIDReturns = struct {
+		result1 db.Build
+		result2 bool
+		result3 error
+	}{result1, result2, result3}
+}
+
+func (fake *FakeJob) BuildByTriggerIDReturnsOnCall(i int, result1 db.Build, result2 bool, result3 error) {
+	fake.buildByTriggerIDMutex.Lock()
+	defer fake.buildByTriggerIDMutex.Unlock()
+	fake.BuildByTriggerIDStub = nil
+	if fake.buildByTriggerIDReturnsOnCall == nil {
+		fake.buildByTriggerIDReturnsOnCall = make(map[int]struct {
+			result1 db.Build
+			result2 bool
+			result3 error
+		})
+	}
+	fake.buildByTriggerIDReturnsOnCall[i] = struct {
+		result1 db.Build
+		result2 bool
+		result3 error
+	}{result1, result2, result3}
+}
+
 func (fake *FakeJob) Builds(arg1 db.Page) ([]db.BuildForAPI, db.Pagination, error) {
 	fake.buildsMutex.Lock()
 	ret, specificReturn := fake.buildsReturnsOnCall[len(fake.buildsArgsForCall)]
@@ -1234,6 +1335,75 @@ func (fake *FakeJob) CreateBuildWithVarsReturnsOnCall(i int, result1 db.Build, r
 		result1 db.Build
 		result2 error
 	}{result1, result2}
+}
+
+func (fake *FakeJob) CreateBuildWithVarsAndTriggerID(arg1 string, arg2 map[string]any, arg3 string) (db.Build, bool, error) {
+	fake.createBuildWithVarsAndTriggerIDMutex.Lock()
+	ret, specificReturn := fake.createBuildWithVarsAndTriggerIDReturnsOnCall[len(fake.createBuildWithVarsAndTriggerIDArgsForCall)]
+	fake.createBuildWithVarsAndTriggerIDArgsForCall = append(fake.createBuildWithVarsAndTriggerIDArgsForCall, struct {
+		arg1 string
+		arg2 map[string]any
+		arg3 string
+	}{arg1, arg2, arg3})
+	stub := fake.CreateBuildWithVarsAndTriggerIDStub
+	fakeReturns := fake.createBuildWithVarsAndTriggerIDReturns
+	fake.recordInvocation("CreateBuildWithVarsAndTriggerID", []interface{}{arg1, arg2, arg3})
+	fake.createBuildWithVarsAndTriggerIDMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2, ret.result3
+	}
+	return fakeReturns.result1, fakeReturns.result2, fakeReturns.result3
+}
+
+func (fake *FakeJob) CreateBuildWithVarsAndTriggerIDCallCount() int {
+	fake.createBuildWithVarsAndTriggerIDMutex.RLock()
+	defer fake.createBuildWithVarsAndTriggerIDMutex.RUnlock()
+	return len(fake.createBuildWithVarsAndTriggerIDArgsForCall)
+}
+
+func (fake *FakeJob) CreateBuildWithVarsAndTriggerIDCalls(stub func(string, map[string]any, string) (db.Build, bool, error)) {
+	fake.createBuildWithVarsAndTriggerIDMutex.Lock()
+	defer fake.createBuildWithVarsAndTriggerIDMutex.Unlock()
+	fake.CreateBuildWithVarsAndTriggerIDStub = stub
+}
+
+func (fake *FakeJob) CreateBuildWithVarsAndTriggerIDArgsForCall(i int) (string, map[string]any, string) {
+	fake.createBuildWithVarsAndTriggerIDMutex.RLock()
+	defer fake.createBuildWithVarsAndTriggerIDMutex.RUnlock()
+	argsForCall := fake.createBuildWithVarsAndTriggerIDArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *FakeJob) CreateBuildWithVarsAndTriggerIDReturns(result1 db.Build, result2 bool, result3 error) {
+	fake.createBuildWithVarsAndTriggerIDMutex.Lock()
+	defer fake.createBuildWithVarsAndTriggerIDMutex.Unlock()
+	fake.CreateBuildWithVarsAndTriggerIDStub = nil
+	fake.createBuildWithVarsAndTriggerIDReturns = struct {
+		result1 db.Build
+		result2 bool
+		result3 error
+	}{result1, result2, result3}
+}
+
+func (fake *FakeJob) CreateBuildWithVarsAndTriggerIDReturnsOnCall(i int, result1 db.Build, result2 bool, result3 error) {
+	fake.createBuildWithVarsAndTriggerIDMutex.Lock()
+	defer fake.createBuildWithVarsAndTriggerIDMutex.Unlock()
+	fake.CreateBuildWithVarsAndTriggerIDStub = nil
+	if fake.createBuildWithVarsAndTriggerIDReturnsOnCall == nil {
+		fake.createBuildWithVarsAndTriggerIDReturnsOnCall = make(map[int]struct {
+			result1 db.Build
+			result2 bool
+			result3 error
+		})
+	}
+	fake.createBuildWithVarsAndTriggerIDReturnsOnCall[i] = struct {
+		result1 db.Build
+		result2 bool
+		result3 error
+	}{result1, result2, result3}
 }
 
 func (fake *FakeJob) DisableManualTrigger() bool {

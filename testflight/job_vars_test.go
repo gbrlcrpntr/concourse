@@ -2,6 +2,9 @@ package testflight_test
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -92,9 +95,22 @@ var _ = Describe("Job trigger-time vars", func() {
 			)
 		})
 
-		postWebhook := func(token string, payload string) (*http.Response, []byte) {
-			url := webhookURL + "?webhook_token=" + token + "&name=github-pr"
-			resp, err := http.Post(url, "application/json", bytes.NewBufferString(payload))
+		postWebhook := func(secret, deliveryID, payload string) (*http.Response, []byte) {
+			mac := hmac.New(sha256.New, []byte(secret))
+			_, err := mac.Write([]byte(payload))
+			Expect(err).ToNot(HaveOccurred())
+
+			request, err := http.NewRequest(
+				http.MethodPost,
+				webhookURL+"?name=github-pr",
+				bytes.NewBufferString(payload),
+			)
+			Expect(err).ToNot(HaveOccurred())
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+			request.Header.Set("X-GitHub-Delivery", deliveryID)
+
+			resp, err := http.DefaultClient.Do(request)
 			Expect(err).ToNot(HaveOccurred())
 
 			body, err := io.ReadAll(resp.Body)
@@ -106,14 +122,20 @@ var _ = Describe("Job trigger-time vars", func() {
 
 		It("creates a build with vars extracted from the payload", func(ctx SpecContext) {
 			By("posting a payload that matches the filter")
-			resp, body := postWebhook("wh-secret", `{
-				"action": "opened",
+			payload := `{
+				"action": "synchronize",
+				"number": 42,
 				"pull_request": {
 					"head": {
-						"ref": "pr-branch"
+						"ref": "pr-branch",
+						"sha": "abc123"
+					},
+					"base": {
+						"ref": "main"
 					}
 				}
-			}`)
+			}`
+			resp, body := postWebhook("wh-secret", "delivery-123", payload)
 			Expect(resp.StatusCode).To(Equal(http.StatusCreated), "Body: "+string(body))
 
 			var build struct {
@@ -125,9 +147,21 @@ var _ = Describe("Job trigger-time vars", func() {
 			By("watching the created build")
 			watch := waitForBuildAndWatch("echo-vars", build.Name)
 			Eventually(watch).Should(gbytes.Say("branch=pr-branch"))
+			Eventually(watch).Should(gbytes.Say("pr_number=42"))
+			Eventually(watch).Should(gbytes.Say("head_sha=abc123"))
+			Eventually(watch).Should(gbytes.Say("base_ref=main"))
+
+			By("returning the existing build for a redelivery")
+			resp, duplicateBody := postWebhook("wh-secret", "delivery-123", payload)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK), "Body: "+string(duplicateBody))
+			var duplicateBuild struct {
+				Name string `json:"name"`
+			}
+			Expect(json.Unmarshal(duplicateBody, &duplicateBuild)).To(Succeed())
+			Expect(duplicateBuild.Name).To(Equal(build.Name))
 
 			By("posting a payload that does not match the filter")
-			resp, body = postWebhook("wh-secret", `{
+			resp, body = postWebhook("wh-secret", "delivery-closed", `{
 				"action": "closed",
 				"pull_request": {
 					"head": {
@@ -142,8 +176,8 @@ var _ = Describe("Job trigger-time vars", func() {
 			builds := flyTable("builds", "-j", inPipeline("echo-vars"))
 			Expect(builds).To(HaveLen(1))
 
-			By("rejecting a request with the wrong token")
-			resp, _ = postWebhook("bogus-token", `{
+			By("rejecting a request with the wrong signing secret")
+			resp, _ = postWebhook("bogus-secret", "delivery-invalid", `{
 				"action": "opened",
 				"pull_request": {
 					"head": {
@@ -160,7 +194,7 @@ var _ = Describe("Job trigger-time vars", func() {
 				strings.Repeat("x", (1<<20)+1),
 			)
 
-			resp, body := postWebhook("wh-secret", payload)
+			resp, body := postWebhook("wh-secret", "delivery-large", payload)
 			Expect(resp.StatusCode).To(Equal(http.StatusBadRequest), "Body: "+string(body))
 			Expect(string(body)).To(ContainSubstring("request body too large"))
 			Expect(flyTable("builds", "-j", inPipeline("echo-vars"))).To(BeEmpty())

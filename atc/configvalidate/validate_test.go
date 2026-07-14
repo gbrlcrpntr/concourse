@@ -2724,7 +2724,7 @@ var _ = Describe("ValidateConfig", func() {
 			})
 		})
 
-		Context("when a webhook has no token", func() {
+		Context("when a webhook has no authentication", func() {
 			BeforeEach(func() {
 				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
 					{Name: "pr-open"},
@@ -2733,7 +2733,103 @@ var _ = Describe("ValidateConfig", func() {
 
 			It("returns an error", func() {
 				Expect(errorMessages).To(HaveLen(1))
-				Expect(errorMessages[0]).To(ContainSubstring("jobs.some-job.trigger_webhooks[0] has no token"))
+				Expect(errorMessages[0]).To(ContainSubstring("must configure exactly one of token or authentication.hmac_sha256"))
+			})
+		})
+
+		Context("when a webhook has HMAC authentication", func() {
+			BeforeEach(func() {
+				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
+					{
+						Name: "pr-open",
+						Authentication: &atc.TriggerWebhookAuthentication{
+							HMACSHA256: &atc.TriggerWebhookHMACSHA256{
+								Secret: "((github-webhook-secret))",
+								Header: "X-Hub-Signature-256",
+								Prefix: "sha256=",
+							},
+						},
+						DeliveryID: &atc.TriggerWebhookDeliveryID{Header: "X-GitHub-Delivery"},
+					},
+				}
+			})
+
+			It("returns no error", func() {
+				Expect(errorMessages).To(HaveLen(0))
+			})
+		})
+
+		Context("when a webhook has both authentication forms", func() {
+			BeforeEach(func() {
+				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
+					{
+						Name:  "pr-open",
+						Token: "some-token",
+						Authentication: &atc.TriggerWebhookAuthentication{
+							HMACSHA256: &atc.TriggerWebhookHMACSHA256{
+								Secret: "some-secret",
+								Header: "X-Signature",
+							},
+						},
+					},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(ContainElement(ContainSubstring("must configure exactly one")))
+			})
+		})
+
+		Context("when an HMAC authentication field is empty", func() {
+			BeforeEach(func() {
+				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
+					{
+						Name: "pr-open",
+						Authentication: &atc.TriggerWebhookAuthentication{
+							HMACSHA256: &atc.TriggerWebhookHMACSHA256{},
+						},
+						DeliveryID: &atc.TriggerWebhookDeliveryID{},
+					},
+				}
+			})
+
+			It("reports each missing field", func() {
+				Expect(errorMessages).To(HaveLen(1))
+				Expect(errorMessages[0]).To(ContainSubstring("hmac_sha256 has no secret"))
+				Expect(errorMessages[0]).To(ContainSubstring("hmac_sha256 has no header"))
+				Expect(errorMessages[0]).To(ContainSubstring("delivery_id has no header"))
+			})
+		})
+
+		Context("when a one_of filter is valid", func() {
+			BeforeEach(func() {
+				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
+					{
+						Name:   "pr-event",
+						Token:  "some-token",
+						Filter: map[string]any{"action": map[string]any{"one_of": []any{"opened", "synchronize"}}},
+					},
+				}
+			})
+
+			It("returns no error", func() {
+				Expect(errorMessages).To(HaveLen(0))
+			})
+		})
+
+		Context("when a one_of filter is malformed", func() {
+			BeforeEach(func() {
+				config.Jobs[0].TriggerWebhooks = []atc.TriggerWebhook{
+					{
+						Name:   "pr-event",
+						Token:  "some-token",
+						Filter: map[string]any{"action": map[string]any{"one_of": []any{}, "other": true}},
+					},
+				}
+			})
+
+			It("returns an error", func() {
+				Expect(errorMessages).To(ContainElement(ContainSubstring("one_of must be a non-empty list")))
 			})
 		})
 

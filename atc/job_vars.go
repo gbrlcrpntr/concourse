@@ -40,7 +40,11 @@ type TriggerWebhook struct {
 	// Token authenticates webhook requests via the webhook_token query
 	// param. It may be a ((var)) reference resolved through the pipeline's
 	// var sources.
-	Token string `json:"token"`
+	Token string `json:"token,omitempty"`
+
+	// Authentication configures request authentication as an alternative to
+	// the webhook_token query param.
+	Authentication *TriggerWebhookAuthentication `json:"authentication,omitempty"`
 
 	// Filter maps dot-paths into the payload to expected values; if any
 	// entry does not match, the webhook is ignored.
@@ -48,6 +52,30 @@ type TriggerWebhook struct {
 
 	// VarMapping maps declared var names to dot-paths into the payload.
 	VarMapping map[string]string `json:"var_mapping,omitempty"`
+
+	// DeliveryID identifies the request header used to deduplicate webhook
+	// deliveries for this job and webhook.
+	DeliveryID *TriggerWebhookDeliveryID `json:"delivery_id,omitempty"`
+}
+
+// TriggerWebhookAuthentication configures authentication for a trigger
+// webhook.
+type TriggerWebhookAuthentication struct {
+	HMACSHA256 *TriggerWebhookHMACSHA256 `json:"hmac_sha256,omitempty"`
+}
+
+// TriggerWebhookHMACSHA256 verifies a hex-encoded HMAC-SHA256 signature from
+// a request header. Prefix is removed before decoding the signature.
+type TriggerWebhookHMACSHA256 struct {
+	Secret string `json:"secret"`
+	Header string `json:"header"`
+	Prefix string `json:"prefix,omitempty"`
+}
+
+// TriggerWebhookDeliveryID identifies the request header containing a
+// provider delivery ID.
+type TriggerWebhookDeliveryID struct {
+	Header string `json:"header"`
 }
 
 // Validate checks per-build var overrides against the declared vars,

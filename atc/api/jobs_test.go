@@ -2,6 +2,9 @@ package api_test
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +20,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+func webhookHMACSignature(payload, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(payload))
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
 
 var _ = Describe("Jobs API", func() {
 	var fakeJob *dbfakes.FakeJob
@@ -1569,6 +1578,7 @@ var _ = Describe("Jobs API", func() {
 		var response *http.Response
 		var payload string
 		var queryParams string
+		var requestHeaders http.Header
 
 		BeforeEach(func() {
 			payload = `{
@@ -1576,6 +1586,7 @@ var _ = Describe("Jobs API", func() {
 				"pull_request": {"head": {"ref": "pr-branch", "sha": "abc123"}}
 			}`
 			queryParams = "?webhook_token=wh-token&name=github-pr"
+			requestHeaders = http.Header{}
 
 			fakeJob.NameReturns("some-job")
 			fakeJob.ConfigReturns(atc.JobConfig{
@@ -1599,6 +1610,7 @@ var _ = Describe("Jobs API", func() {
 			build := new(dbfakes.FakeBuild)
 			build.IDReturns(42)
 			fakeJob.CreateBuildWithVarsReturns(build, nil)
+			fakeJob.CreateBuildWithVarsAndTriggerIDReturns(build, true, nil)
 		})
 
 		JustBeforeEach(func() {
@@ -1609,6 +1621,11 @@ var _ = Describe("Jobs API", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 			request.Header.Set("Content-Type", "application/json")
+			for name, values := range requestHeaders {
+				for _, value := range values {
+					request.Header.Add(name, value)
+				}
+			}
 
 			response, err = client.Do(request)
 			Expect(err).NotTo(HaveOccurred())
@@ -1651,6 +1668,131 @@ var _ = Describe("Jobs API", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(string(body)).To(ContainSubstring(`"skipped": true`))
 				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("when a one_of filter matches", func() {
+			BeforeEach(func() {
+				fakeJob.ConfigReturns(atc.JobConfig{
+					Vars: atc.JobVars{"branch": {Default: "main"}},
+					TriggerWebhooks: []atc.TriggerWebhook{
+						{
+							Name:   "github-pr",
+							Token:  "wh-token",
+							Filter: map[string]any{"action": map[string]any{"one_of": []any{"opened", "synchronize"}}},
+							VarMapping: map[string]string{
+								"branch": "pull_request.head.ref",
+							},
+						},
+					},
+				}, nil)
+				payload = `{
+					"action": "synchronize",
+					"pull_request": {"head": {"ref": "pr-branch"}}
+				}`
+			})
+
+			It("creates the build", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusCreated))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(1))
+			})
+		})
+
+		Context("when HMAC authentication is configured", func() {
+			BeforeEach(func() {
+				queryParams = "?name=github-pr"
+				fakeJob.ConfigReturns(atc.JobConfig{
+					Vars: atc.JobVars{"branch": {Default: "main"}},
+					TriggerWebhooks: []atc.TriggerWebhook{
+						{
+							Name: "github-pr",
+							Authentication: &atc.TriggerWebhookAuthentication{
+								HMACSHA256: &atc.TriggerWebhookHMACSHA256{
+									Secret: "signing-secret",
+									Header: "X-Hub-Signature-256",
+									Prefix: "sha256=",
+								},
+							},
+							VarMapping: map[string]string{
+								"branch": "pull_request.head.ref",
+							},
+						},
+					},
+				}, nil)
+				requestHeaders.Set("X-Hub-Signature-256", webhookHMACSignature(payload, "signing-secret"))
+			})
+
+			It("creates the build when the signature matches", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusCreated))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(1))
+			})
+
+			Context("when the signature does not match", func() {
+				BeforeEach(func() {
+					requestHeaders.Set("X-Hub-Signature-256", "sha256=deadbeef")
+				})
+
+				It("returns 401", func() {
+					Expect(response.StatusCode).To(Equal(http.StatusUnauthorized))
+					Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+				})
+			})
+		})
+
+		Context("when delivery ID deduplication is configured", func() {
+			BeforeEach(func() {
+				config, err := fakeJob.Config()
+				Expect(err).NotTo(HaveOccurred())
+				config.TriggerWebhooks[0].DeliveryID = &atc.TriggerWebhookDeliveryID{Header: "X-GitHub-Delivery"}
+				fakeJob.ConfigReturns(config, nil)
+				requestHeaders.Set("X-GitHub-Delivery", "delivery-123")
+			})
+
+			It("creates the build using the delivery ID", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusCreated))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+				Expect(fakeJob.CreateBuildWithVarsAndTriggerIDCallCount()).To(Equal(1))
+				createdBy, triggerVars, triggerID := fakeJob.CreateBuildWithVarsAndTriggerIDArgsForCall(0)
+				Expect(createdBy).To(Equal("webhook:github-pr"))
+				Expect(triggerVars).To(Equal(map[string]any{"branch": "pr-branch"}))
+				Expect(triggerID).To(Equal("delivery-123"))
+			})
+
+			Context("when the delivery was already accepted", func() {
+				BeforeEach(func() {
+					build := new(dbfakes.FakeBuild)
+					build.IDReturns(42)
+					fakeJob.BuildByTriggerIDReturns(build, true, nil)
+				})
+
+				It("returns 200 with the existing build", func() {
+					Expect(response.StatusCode).To(Equal(http.StatusOK))
+					Expect(fakeJob.BuildByTriggerIDCallCount()).To(Equal(1))
+					Expect(fakeJob.CreateBuildWithVarsAndTriggerIDCallCount()).To(Equal(0))
+				})
+			})
+
+			Context("when the delivery header is missing", func() {
+				BeforeEach(func() {
+					requestHeaders.Del("X-GitHub-Delivery")
+				})
+
+				It("returns 400", func() {
+					Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+					Expect(fakeJob.CreateBuildWithVarsAndTriggerIDCallCount()).To(Equal(0))
+				})
+			})
+
+			Context("when the delivery ID is too long", func() {
+				BeforeEach(func() {
+					requestHeaders.Set("X-GitHub-Delivery", strings.Repeat("x", 257))
+				})
+
+				It("returns 400", func() {
+					Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+					Expect(fakeJob.BuildByTriggerIDCallCount()).To(Equal(0))
+					Expect(fakeJob.CreateBuildWithVarsAndTriggerIDCallCount()).To(Equal(0))
+				})
 			})
 		})
 
@@ -1784,6 +1926,17 @@ var _ = Describe("Jobs API", func() {
 		Context("when the payload is not JSON", func() {
 			BeforeEach(func() {
 				payload = `not-json`
+			})
+
+			It("returns 400", func() {
+				Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+				Expect(fakeJob.CreateBuildWithVarsCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("when the payload is JSON null", func() {
+			BeforeEach(func() {
+				payload = `null`
 			})
 
 			It("returns 400", func() {

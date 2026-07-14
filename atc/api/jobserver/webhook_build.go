@@ -1,10 +1,15 @@
 package jobserver
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"code.cloudfoundry.org/lager/v3"
 	"github.com/concourse/concourse/atc"
@@ -15,31 +20,27 @@ import (
 	"github.com/tedsuo/rata"
 )
 
-const webhookPayloadLimit = 1 << 20 // 1 MiB
+const (
+	webhookPayloadLimit    = 1 << 20 // 1 MiB
+	webhookDeliveryIDLimit = 256
+)
 
 // CreateJobBuildWebhook triggers a build of a job from an inbound webhook,
 // extracting the job's declared vars from the JSON payload according to the
 // matching trigger_webhooks entry in the job's config. Requests are
-// authenticated by the webhook_token query param, like resource check
-// webhooks.
+// authenticated by either the webhook_token query param, like resource check
+// webhooks, or a configured HMAC-SHA256 signature.
 func (s *Server) CreateJobBuildWebhook(pipeline db.Pipeline) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		jobName := rata.Param(r, "job_name")
 		hookName := r.URL.Query().Get("name")
-		webhookToken := r.URL.Query().Get("webhook_token")
 
 		logger := s.logger.Session("create-job-build-webhook", lager.Data{
 			"job":     jobName,
 			"webhook": hookName,
 		})
-
-		if webhookToken == "" {
-			logger.Info("no-webhook-token")
-			writeJSONError(w, http.StatusBadRequest, "missing webhook_token")
-			return
-		}
 
 		job, found, err := pipeline.Job(jobName)
 		if err != nil {
@@ -66,6 +67,12 @@ func (s *Server) CreateJobBuildWebhook(pipeline db.Pipeline) http.Handler {
 			return
 		}
 
+		requestBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, webhookPayloadLimit))
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("malformed payload: %s", err))
+			return
+		}
+
 		secretsParams := creds.SecretLookupParams{
 			Team:         pipeline.TeamName(),
 			Pipeline:     pipeline.Name(),
@@ -80,23 +87,84 @@ func (s *Server) CreateJobBuildWebhook(pipeline db.Pipeline) http.Handler {
 			return
 		}
 
-		token, err := creds.NewString(variables, hook.Token).Evaluate()
-		if err != nil {
-			logger.Error("failed-to-evaluate-webhook-token", err)
+		if hook.Token != "" {
+			webhookToken := r.URL.Query().Get("webhook_token")
+			if webhookToken == "" {
+				logger.Info("no-webhook-token")
+				writeJSONError(w, http.StatusBadRequest, "missing webhook_token")
+				return
+			}
+
+			token, err := creds.NewString(variables, hook.Token).Evaluate()
+			if err != nil {
+				logger.Error("failed-to-evaluate-webhook-token", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+
+			if !hmac.Equal([]byte(token), []byte(webhookToken)) {
+				logger.Info("invalid-token")
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		} else if hook.Authentication != nil && hook.Authentication.HMACSHA256 != nil {
+			hmacConfig := hook.Authentication.HMACSHA256
+			secret, err := creds.NewString(variables, hmacConfig.Secret).Evaluate()
+			if err != nil {
+				logger.Error("failed-to-evaluate-webhook-hmac-secret", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+
+			if !validHMACSHA256(requestBody, r.Header.Get(hmacConfig.Header), secret, hmacConfig.Prefix) {
+				logger.Info("invalid-hmac-signature")
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		} else {
+			logger.Error("invalid-webhook-authentication", fmt.Errorf("no authentication configured"))
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		if token != webhookToken {
-			logger.Info("invalid-token")
-			w.WriteHeader(http.StatusUnauthorized)
-			return
+		createdBy := "webhook:" + hook.Name
+		deliveryID := ""
+		if hook.DeliveryID != nil {
+			deliveryID = r.Header.Get(hook.DeliveryID.Header)
+			if deliveryID == "" {
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("missing delivery ID header %s", hook.DeliveryID.Header))
+				return
+			}
+			if len(deliveryID) > webhookDeliveryIDLimit || !utf8.ValidString(deliveryID) {
+				writeJSONError(w, http.StatusBadRequest, "delivery ID must be valid UTF-8 and at most 256 bytes")
+				return
+			}
+
+			existingBuild, found, err := job.BuildByTriggerID(createdBy, deliveryID)
+			if err != nil {
+				logger.Error("failed-to-find-webhook-delivery", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			if found {
+				logger.Info("duplicate-delivery")
+				w.WriteHeader(http.StatusOK)
+				err = json.NewEncoder(w).Encode(present.Build(existingBuild, job, nil))
+				if err != nil {
+					logger.Error("failed-to-encode-build", err)
+				}
+				return
+			}
 		}
 
 		var payload map[string]any
-		err = json.NewDecoder(http.MaxBytesReader(w, r.Body, webhookPayloadLimit)).Decode(&payload)
+		err = json.Unmarshal(requestBody, &payload)
 		if err != nil {
 			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("malformed payload: %s", err))
+			return
+		}
+		if payload == nil {
+			writeJSONError(w, http.StatusBadRequest, "malformed payload: expected a JSON object")
 			return
 		}
 
@@ -119,14 +187,25 @@ func (s *Server) CreateJobBuildWebhook(pipeline db.Pipeline) http.Handler {
 			return
 		}
 
-		build, err := job.CreateBuildWithVars("webhook:"+hook.Name, triggerVars)
+		var build db.Build
+		created := true
+		if hook.DeliveryID != nil {
+			build, created, err = job.CreateBuildWithVarsAndTriggerID(createdBy, triggerVars, deliveryID)
+		} else {
+			build, err = job.CreateBuildWithVars(createdBy, triggerVars)
+		}
 		if err != nil {
 			logger.Error("failed-to-create-job-build", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		w.WriteHeader(http.StatusCreated)
+		if created {
+			w.WriteHeader(http.StatusCreated)
+		} else {
+			logger.Info("duplicate-delivery")
+			w.WriteHeader(http.StatusOK)
+		}
 
 		err = json.NewEncoder(w).Encode(present.Build(build, job, nil))
 		if err != nil {
@@ -134,6 +213,21 @@ func (s *Server) CreateJobBuildWebhook(pipeline db.Pipeline) http.Handler {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	})
+}
+
+func validHMACSHA256(payload []byte, signature, secret, prefix string) bool {
+	if !strings.HasPrefix(signature, prefix) {
+		return false
+	}
+
+	providedMAC, err := hex.DecodeString(strings.TrimPrefix(signature, prefix))
+	if err != nil {
+		return false
+	}
+
+	expectedMAC := hmac.New(sha256.New, []byte(secret))
+	_, _ = expectedMAC.Write(payload)
+	return hmac.Equal(providedMAC, expectedMAC.Sum(nil))
 }
 
 // selectWebhook picks the trigger_webhooks entry named by the request, or the
@@ -167,19 +261,38 @@ func matchesFilter(payload map[string]any, filter map[string]any) bool {
 		if !found {
 			return false
 		}
-		expectedJSON, err := json.Marshal(expected)
-		if err != nil {
-			return false
-		}
-		actualJSON, err := json.Marshal(actual)
-		if err != nil {
-			return false
-		}
-		if string(expectedJSON) != string(actualJSON) {
+		if !matchesFilterValue(actual, expected) {
 			return false
 		}
 	}
 	return true
+}
+
+func matchesFilterValue(actual, expected any) bool {
+	if condition, ok := expected.(map[string]any); ok {
+		if oneOf, ok := condition["one_of"].([]any); ok && len(condition) == 1 {
+			for _, option := range oneOf {
+				if jsonValuesEqual(actual, option) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+
+	return jsonValuesEqual(actual, expected)
+}
+
+func jsonValuesEqual(left, right any) bool {
+	leftJSON, err := json.Marshal(left)
+	if err != nil {
+		return false
+	}
+	rightJSON, err := json.Marshal(right)
+	if err != nil {
+		return false
+	}
+	return string(leftJSON) == string(rightJSON)
 }
 
 // extractVars maps payload fields onto declared vars via each mapping's

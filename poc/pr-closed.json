@@ -4,6 +4,7 @@
   "pull_request": {
     "number": 42,
     "state": "closed",
+    "draft": false,
     "title": "Demo PR for job trigger-time vars",
     "user": {
       "login": "octocat"

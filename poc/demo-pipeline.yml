@@ -26,13 +26,6 @@ jobs:
       options: [dev, staging, prod]
       default: dev
       description: environment label to show in the build log
-  trigger_webhooks:
-  - name: github-pr
-    token: wh-secret
-    filter:
-      action: opened
-    var_mapping:
-      branch: pull_request.head.ref
   plan:
   - task: clone-and-report
     config:
@@ -55,3 +48,60 @@ jobs:
           git clone -b '((.:branch))' --depth '((.:clone_depth))' https://github.com/octocat/Hello-World.git repo
           cd repo
           echo "cloned branch: $(git rev-parse --abbrev-ref HEAD) @ $(git rev-parse --short HEAD)"
+
+- name: build-pull-request
+  vars:
+    pr_number:
+      type: number
+      required: true
+      description: GitHub pull request number
+    head_sha:
+      required: true
+      description: immutable pull request head commit
+    head_ref:
+      required: true
+      description: pull request head branch for display
+    base_ref:
+      required: true
+      description: pull request base branch for display
+  trigger_webhooks:
+  - name: github-pr
+    authentication:
+      hmac_sha256:
+        secret: wh-secret
+        header: X-Hub-Signature-256
+        prefix: sha256=
+    delivery_id:
+      header: X-GitHub-Delivery
+    filter:
+      action:
+        one_of: [opened, reopened, synchronize, ready_for_review]
+      pull_request.draft: false
+    var_mapping:
+      pr_number: number
+      head_sha: pull_request.head.sha
+      head_ref: pull_request.head.ref
+      base_ref: pull_request.base.ref
+  plan:
+  - task: checkout-and-report
+    config:
+      platform: linux
+
+      image_resource:
+        type: registry-image
+        source:
+          repository: alpine/git
+
+      run:
+        path: sh
+        args:
+        - -exc
+        - |
+          echo "PR #((.:pr_number)): ((.:head_ref)) -> ((.:base_ref))"
+          git init repo
+          cd repo
+          git remote add origin https://github.com/octocat/Hello-World.git
+          git fetch --depth 1 origin '((.:head_sha))'
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = '((.:head_sha))'
+          echo "checked out immutable head SHA: $(git rev-parse HEAD)"

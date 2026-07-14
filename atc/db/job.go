@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -90,6 +91,8 @@ type Job interface {
 	ScheduleBuild(Build) (bool, error)
 	CreateBuild(createdBy string) (Build, error)
 	CreateBuildWithVars(createdBy string, triggerVars map[string]any) (Build, error)
+	BuildByTriggerID(createdBy string, triggerID string) (Build, bool, error)
+	CreateBuildWithVarsAndTriggerID(createdBy string, triggerVars map[string]any, triggerID string) (Build, bool, error)
 	RerunBuild(build Build, createdBy string) (Build, error)
 
 	RequestSchedule() error
@@ -841,16 +844,84 @@ func (j *job) CreateBuild(createdBy string) (Build, error) {
 }
 
 func (j *job) CreateBuildWithVars(createdBy string, triggerVars map[string]any) (Build, error) {
+	build, _, err := j.createBuildWithVars(createdBy, triggerVars, "")
+	return build, err
+}
+
+func (j *job) BuildByTriggerID(createdBy string, triggerID string) (Build, bool, error) {
+	build := newEmptyBuild(j.conn, j.lockFactory)
+	err := scanBuild(build, buildsQuery.
+		Where(sq.Eq{
+			"b.job_id":     j.id,
+			"b.created_by": createdBy,
+			"b.trigger_id": triggerID,
+		}).
+		RunWith(j.conn).
+		QueryRow(), j.conn.EncryptionStrategy())
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+
+	return build, true, nil
+}
+
+func (j *job) CreateBuildWithVarsAndTriggerID(
+	createdBy string,
+	triggerVars map[string]any,
+	triggerID string,
+) (Build, bool, error) {
+	if triggerID == "" {
+		return nil, false, errors.New("trigger ID must not be empty")
+	}
+
+	return j.createBuildWithVars(createdBy, triggerVars, triggerID)
+}
+
+func (j *job) createBuildWithVars(
+	createdBy string,
+	triggerVars map[string]any,
+	triggerID string,
+) (Build, bool, error) {
 	tx, err := j.conn.Begin()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	defer Rollback(tx)
 
+	if triggerID != "" {
+		_, err = tx.Exec(
+			"SELECT pg_advisory_xact_lock($1, hashtext($2))",
+			j.id,
+			createdBy+"\n"+triggerID,
+		)
+		if err != nil {
+			return nil, false, err
+		}
+
+		existingBuild := newEmptyBuild(j.conn, j.lockFactory)
+		err = scanBuild(existingBuild, buildsQuery.
+			Where(sq.Eq{
+				"b.job_id":     j.id,
+				"b.created_by": createdBy,
+				"b.trigger_id": triggerID,
+			}).
+			RunWith(tx).
+			QueryRow(), j.conn.EncryptionStrategy())
+		if err == nil {
+			return existingBuild, false, nil
+		}
+		if err != sql.ErrNoRows {
+			return nil, false, err
+		}
+	}
+
 	buildName, err := j.getNewBuildName(tx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	vals := map[string]any{
@@ -866,38 +937,41 @@ func (j *job) CreateBuildWithVars(createdBy string, triggerVars map[string]any) 
 	if len(triggerVars) > 0 {
 		marshaledVars, err := json.Marshal(triggerVars)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		vals["trigger_vars"] = marshaledVars
+	}
+	if triggerID != "" {
+		vals["trigger_id"] = triggerID
 	}
 
 	build := newEmptyBuild(j.conn, j.lockFactory)
 	err = createBuild(tx, build, vals)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	latestNonRerunID, err := latestCompletedNonRerunBuild(tx, j.id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	err = updateNextBuildForJob(tx, j.id, latestNonRerunID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	err = requestSchedule(tx, j.id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	err = tx.Commit()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return build, nil
+	return build, true, nil
 }
 
 func (j *job) RerunBuild(buildToRerun Build, createdBy string) (Build, error) {

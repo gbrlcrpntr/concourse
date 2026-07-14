@@ -439,8 +439,48 @@ func validateJobs(c atc.Config) ([]atc.ConfigWarning, error) {
 				webhookNames[webhook.Name] = true
 			}
 
-			if webhook.Token == "" {
-				errorMessages = append(errorMessages, webhookIdentifier+" has no token")
+			hasToken := webhook.Token != ""
+			hasAuthentication := webhook.Authentication != nil
+			if hasToken == hasAuthentication {
+				errorMessages = append(
+					errorMessages,
+					webhookIdentifier+" must configure exactly one of token or authentication.hmac_sha256",
+				)
+			}
+
+			if hasAuthentication && webhook.Authentication.HMACSHA256 == nil {
+				errorMessages = append(errorMessages, webhookIdentifier+".authentication has no hmac_sha256")
+			}
+
+			if hasAuthentication && webhook.Authentication.HMACSHA256 != nil {
+				hmacIdentifier := webhookIdentifier + ".authentication.hmac_sha256"
+				if webhook.Authentication.HMACSHA256.Secret == "" {
+					errorMessages = append(errorMessages, hmacIdentifier+" has no secret")
+				}
+				if webhook.Authentication.HMACSHA256.Header == "" {
+					errorMessages = append(errorMessages, hmacIdentifier+" has no header")
+				}
+			}
+
+			if webhook.DeliveryID != nil && webhook.DeliveryID.Header == "" {
+				errorMessages = append(errorMessages, webhookIdentifier+".delivery_id has no header")
+			}
+
+			for path, expected := range webhook.Filter {
+				condition, isCondition := expected.(map[string]any)
+				oneOf, hasOneOf := condition["one_of"]
+				if !isCondition || !hasOneOf {
+					continue
+				}
+
+				filterIdentifier := fmt.Sprintf("%s.filter[%s].one_of", webhookIdentifier, path)
+				options, validOptions := oneOf.([]any)
+				if len(condition) != 1 || !validOptions || len(options) == 0 {
+					errorMessages = append(
+						errorMessages,
+						filterIdentifier+" must be a non-empty list and the condition's only key",
+					)
+				}
 			}
 
 			for varName := range webhook.VarMapping {

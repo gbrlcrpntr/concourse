@@ -728,6 +728,93 @@ var _ = Describe("Job", func() {
 				Expect(found).To(BeTrue())
 				Expect(reloaded.TriggerVars()).To(BeEmpty())
 			})
+
+			It("deduplicates builds with the same trigger ID", func() {
+				firstBuild, created, err := job.CreateBuildWithVarsAndTriggerID(
+					"webhook:github-pr",
+					map[string]any{"branch": "feature-x"},
+					"delivery-123",
+				)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(created).To(BeTrue())
+
+				duplicateBuild, created, err := job.CreateBuildWithVarsAndTriggerID(
+					"webhook:github-pr",
+					map[string]any{"branch": "changed-on-redelivery"},
+					"delivery-123",
+				)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(created).To(BeFalse())
+				Expect(duplicateBuild.ID()).To(Equal(firstBuild.ID()))
+				Expect(duplicateBuild.TriggerVars()).To(Equal(map[string]any{
+					"branch": "feature-x",
+				}))
+
+				lookedUpBuild, found, err := job.BuildByTriggerID("webhook:github-pr", "delivery-123")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(found).To(BeTrue())
+				Expect(lookedUpBuild.ID()).To(Equal(firstBuild.ID()))
+			})
+
+			It("does not deduplicate different trigger IDs", func() {
+				firstBuild, created, err := job.CreateBuildWithVarsAndTriggerID(
+					"webhook:github-pr",
+					nil,
+					"delivery-123",
+				)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(created).To(BeTrue())
+
+				secondBuild, created, err := job.CreateBuildWithVarsAndTriggerID(
+					"webhook:github-pr",
+					nil,
+					"delivery-456",
+				)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(created).To(BeTrue())
+				Expect(secondBuild.ID()).NotTo(Equal(firstBuild.ID()))
+			})
+
+			It("deduplicates concurrent deliveries with the same trigger ID", func() {
+				type result struct {
+					build   db.Build
+					created bool
+					err     error
+				}
+
+				start := make(chan struct{})
+				results := make(chan result, 2)
+				for range 2 {
+					go func() {
+						<-start
+						build, created, err := job.CreateBuildWithVarsAndTriggerID(
+							"webhook:github-pr",
+							map[string]any{"branch": "feature-x"},
+							"delivery-concurrent",
+						)
+						results <- result{build: build, created: created, err: err}
+					}()
+				}
+				close(start)
+
+				first := <-results
+				second := <-results
+				Expect(first.err).NotTo(HaveOccurred())
+				Expect(second.err).NotTo(HaveOccurred())
+				Expect([]bool{first.created, second.created}).To(ConsistOf(true, false))
+				Expect(second.build.ID()).To(Equal(first.build.ID()))
+			})
+
+			It("rejects an empty trigger ID", func() {
+				build, created, err := job.CreateBuildWithVarsAndTriggerID(
+					"webhook:github-pr",
+					nil,
+					"",
+				)
+				Expect(err).To(MatchError("trigger ID must not be empty"))
+				Expect(created).To(BeFalse())
+				Expect(build).To(BeNil())
+			})
 		})
 	})
 

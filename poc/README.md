@@ -15,19 +15,28 @@ Steps reference the vars as build-local vars: `((.:branch))`.
 
 ```yaml
 jobs:
-- name: build-branch
+- name: build-pull-request
   vars:
-    branch: {default: master, description: "branch of Hello-World to clone"}
-    greeting: {default: hello}
-    clone_depth: {type: number, default: 1, description: "git clone depth"}
-    dry_run: {type: boolean, default: false, description: "print the chosen settings"}
-    deploy_env:
-      {type: enum, options: [dev, staging, prod], default: dev, description: "environment label"}
+    pr_number: {type: number, required: true}
+    head_sha: {required: true}
+    head_ref: {required: true}
+    base_ref: {required: true}
   trigger_webhooks:
   - name: github-pr
-    token: wh-secret                              # may be a ((cred)) reference
-    filter: {action: opened}                      # dot-path equality filters
-    var_mapping: {branch: pull_request.head.ref}  # var name -> payload dot-path
+    authentication:
+      hmac_sha256:
+        secret: ((github-webhook-secret))
+        header: X-Hub-Signature-256
+        prefix: sha256=
+    delivery_id: {header: X-GitHub-Delivery}
+    filter:
+      action: {one_of: [opened, reopened, synchronize, ready_for_review]}
+      pull_request.draft: false
+    var_mapping:
+      pr_number: number
+      head_sha: pull_request.head.sha
+      head_ref: pull_request.head.ref
+      base_ref: pull_request.base.ref
 ```
 
 Declarations support `string` (the default type), `number`, `boolean`, and
@@ -209,51 +218,67 @@ curl -i -X POST \
 
 ## Scene 5 — webhook trigger
 
-The webhook endpoint needs no bearer token — it authenticates via the
-`webhook_token` query param (like resource check webhooks), and extracts vars
-from the payload per the job's `var_mapping`.
+The PR demo uses GitHub-compatible HMAC-SHA256 authentication. The configured
+secret may be a credential-manager-backed `((var))`; the literal value in this
+demo is only for local use. The handler verifies `X-Hub-Signature-256` over the
+exact bounded request body before parsing it. Legacy `webhook_token` query
+authentication remains available as a mutually exclusive alternative.
 
-Query-string tokens can be retained by proxies and access logs. Use HTTPS,
-redact query strings in logging infrastructure, and use a dedicated webhook
-token. Provider-native signed webhooks are a possible follow-up, not part of
-this PoC. Request bodies are limited to 1 MiB and are not stored.
+`one_of` accepts the GitHub actions that introduce a new buildable PR head,
+while the second filter skips draft PRs. `X-GitHub-Delivery` makes retries
+idempotent for the same job and webhook. Request bodies are limited to 1 MiB
+and raw payloads are not stored.
 
-A matching payload (`action: opened`) creates a build:
+Compute the signature over the exact file bytes, then post a matching payload:
 
 ```sh
+WEBHOOK_SECRET=wh-secret
+SIGNATURE=$(openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" poc/pr-opened.json | awk '{print $NF}')
 curl -i -X POST \
-  'http://localhost:8080/api/v1/teams/main/pipelines/job-vars-demo/jobs/build-branch/builds/webhook?webhook_token=wh-secret&name=github-pr' \
+  'http://localhost:8080/api/v1/teams/main/pipelines/job-vars-demo/jobs/build-pull-request/builds/webhook?name=github-pr' \
   -H 'Content-Type: application/json' \
-  -d @poc/pr-opened.json
+  -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
+  -H 'X-GitHub-Delivery: demo-opened-1' \
+  --data-binary @poc/pr-opened.json
 # HTTP/1.1 201 Created  + build JSON
 ```
 
-Watch it — `pull_request.head.ref` in the payload is `test`, so:
+Watch it. The task displays the branch context but fetches and verifies the
+immutable `pull_request.head.sha`, avoiding a race if the PR branch moves:
 
 ```sh
-fly -t dev watch -j job-vars-demo/build-branch
+fly -t dev watch -j job-vars-demo/build-pull-request
 # ...
-# cloned branch: test @ b3cbd5b
+# PR #42: test -> master
+# checked out immutable head SHA: b3cbd5bbd7e81436d2eee04537ea2b4c0cad4cdf
 ```
+
+Sending the same request again with delivery ID `demo-opened-1` returns HTTP
+200 and the original build instead of creating a duplicate. A new delivery ID
+creates a new build.
 
 A non-matching payload (`action: closed`) is filtered out — no build:
 
 ```sh
 curl -i -X POST \
-  'http://localhost:8080/api/v1/teams/main/pipelines/job-vars-demo/jobs/build-branch/builds/webhook?webhook_token=wh-secret&name=github-pr' \
+  'http://localhost:8080/api/v1/teams/main/pipelines/job-vars-demo/jobs/build-pull-request/builds/webhook?name=github-pr' \
   -H 'Content-Type: application/json' \
-  -d @poc/pr-closed.json
+  -H "X-Hub-Signature-256: sha256=$(openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" poc/pr-closed.json | awk '{print $NF}')" \
+  -H 'X-GitHub-Delivery: demo-closed-1' \
+  --data-binary @poc/pr-closed.json
 # HTTP/1.1 200 OK
 # {"skipped": true}
 ```
 
-A wrong token is rejected:
+A missing or wrong signature is rejected:
 
 ```sh
 curl -i -X POST \
-  'http://localhost:8080/api/v1/teams/main/pipelines/job-vars-demo/jobs/build-branch/builds/webhook?webhook_token=wrong&name=github-pr' \
+  'http://localhost:8080/api/v1/teams/main/pipelines/job-vars-demo/jobs/build-pull-request/builds/webhook?name=github-pr' \
   -H 'Content-Type: application/json' \
-  -d @poc/pr-opened.json
+  -H 'X-Hub-Signature-256: sha256=deadbeef' \
+  -H 'X-GitHub-Delivery: demo-invalid-1' \
+  --data-binary @poc/pr-opened.json
 # HTTP/1.1 401 Unauthorized
 ```
 
@@ -280,9 +305,10 @@ explicit RFC discussion point; the PoC keeps the simpler override-only model.
 - [ ] Scene 2: `fly trigger-job -v branch=test -v greeting=hi -v deploy_env=prod -y clone_depth=2 -y dry_run=true` overrides text and typed vars
 - [ ] Scene 3: UI trigger form shows defaults + descriptions and renders text/number/checkbox/dropdown controls
 - [ ] Scene 4: API body `{"vars": ...}` overrides; unknown var returns 400
-- [ ] Scene 5: webhook with matching filter returns 201 and builds `branch=test`;
-      `action: closed` returns 200 `{"skipped": true}` with no build; wrong
-      token returns 401
+- [ ] Scene 5: signed webhook with a matching `one_of` filter returns 201 and
+      checks out the exact head SHA; redelivery returns the original build with
+      200; `action: closed` returns 200 `{"skipped": true}` with no build;
+      wrong signature returns 401
 - [ ] Bonus: `fly rerun-build` copies explicit overrides and resolves current defaults
 
 ## Experimenting locally (dev-loop cheat sheet)
